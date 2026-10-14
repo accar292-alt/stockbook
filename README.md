@@ -30,3 +30,13 @@ node import-books.js
 
 - ฐานข้อมูลอยู่ที่ `data/stock.db` (ไม่อยู่ใน git) — สำรองโดยคัดลอกโฟลเดอร์ `data`
 - `config.json`: `"requireLogin": false` = ใช้งานได้โดยไม่ต้องเข้าสู่ระบบ, `true` = ต้องเข้าสู่ระบบ (ครั้งแรกจะให้สร้างบัญชีผู้ดูแล)
+
+## ขึ้นเว็บด้วย Vercel
+
+Vercel เก็บไฟล์ถาวรไม่ได้ ฐานข้อมูลบนเว็บจึงอยู่ที่ [Turso](https://turso.tech) (SQLite บนคลาวด์) แยกจากฐานข้อมูลในออฟฟิศ
+บนเว็บบังคับเข้าสู่ระบบเสมอ
+
+1. สร้างฐานข้อมูลบน Turso แล้วคัดลอก Database URL (`libsql://...`) และสร้าง Token
+2. Vercel → Add New Project → Import repo นี้ → Environment Variables ใส่ `TURSO_DATABASE_URL` และ `TURSO_AUTH_TOKEN` → Deploy
+3. (ถ้าต้องการยกข้อมูลจากออฟฟิศขึ้นเว็บ) สร้างไฟล์ `.env` ในโฟลเดอร์นี้ใส่สองค่าเดียวกัน แล้วรัน `node copy-to-turso.js`
+   ทำได้ครั้งเดียวตอน Turso ยังว่าง — สคริปต์จะไม่ยอมคัดลอกซ้ำ
