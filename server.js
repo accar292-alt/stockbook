@@ -2,7 +2,6 @@
 // - รันในออฟฟิศ: node server.js  → ฐานข้อมูลไฟล์ data/stock.db
 // - รันบน Vercel: api/index.js ใช้ app นี้ → ฐานข้อมูล Turso (ตั้ง TURSO_DATABASE_URL / TURSO_AUTH_TOKEN)
 const express = require('express');
-const { createClient } = require('@libsql/client');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
@@ -11,16 +10,24 @@ const XLSX = require('xlsx');
 
 const PORT = Number(process.env.PORT) || 3000;
 const ON_VERCEL = !!process.env.VERCEL;
+// บน Vercel ใช้ตัวเชื่อมแบบ HTTP ล้วน (ไม่ต้องมีไฟล์ native ของ SQLite)
+const { createClient } = ON_VERCEL ? require('@libsql/client/web') : require('@libsql/client');
 
 // ---------- database ----------
-let dbUrl = process.env.TURSO_DATABASE_URL;
-if (!dbUrl) {
-  if (ON_VERCEL) throw new Error('ยังไม่ได้ตั้งค่า TURSO_DATABASE_URL ใน Vercel');
+let dbUrl = (process.env.TURSO_DATABASE_URL || '').trim();
+if (!dbUrl && !ON_VERCEL) {
   const dataDir = process.env.DATA_DIR || path.join(__dirname, 'data');
   fs.mkdirSync(dataDir, { recursive: true });
   dbUrl = 'file:' + path.join(dataDir, 'stock.db');
 }
-const client = createClient({ url: dbUrl, authToken: process.env.TURSO_AUTH_TOKEN });
+// ตั้งค่าผิดบน Vercel: ไม่ล้มทั้งฟังก์ชัน แต่ตอบข้อความบอกสาเหตุแทน (ดู ensureReady)
+let configError = !dbUrl ? 'ยังไม่ได้ตั้งค่า TURSO_DATABASE_URL ใน Vercel (Settings → Environment Variables) แล้ว Redeploy' : '';
+let client;
+try {
+  client = createClient({ url: dbUrl || 'libsql://unset.invalid', authToken: (process.env.TURSO_AUTH_TOKEN || '').trim() || undefined });
+} catch (e) {
+  configError ||= `ค่า TURSO_DATABASE_URL ไม่ถูกต้อง: ${e.message}`;
+}
 
 // get/all/run บน client หรือบน transaction (ex = ตัวที่มี execute)
 function wrap(ex) {
@@ -102,7 +109,11 @@ async function migrate() {
 }
 let SYSTEM_USER;
 let ready = null;
-const ensureReady = () => (ready ??= migrate().catch((e) => { ready = null; throw e; }));
+const ensureReady = () => (ready ??= (async () => {
+  if (configError) throw new HttpError(500, configError);
+  try { await migrate(); }
+  catch (e) { throw new HttpError(500, `เชื่อมต่อฐานข้อมูลไม่ได้: ${e.message}`); }
+})().catch((e) => { ready = null; throw e; }));
 
 const DOC_PREFIX = { IN: 'รับ', OUT: 'เบิก', DMG: 'ชำรุด' };
 const DMG_REASONS = ['ชำรุด', 'เสียหาย', 'สูญหาย', 'พิมพ์ผิด', 'อื่น ๆ'];
@@ -444,7 +455,7 @@ app.use('/api', (req, res) => res.status(404).json({ error: 'ไม่พบร�
 app.use((err, req, res, next) => {
   const status = err.status || 500;
   if (status === 500) console.error(err);
-  res.status(status).json({ error: status === 500 ? 'เกิดข้อผิดพลาดในระบบ' : err.message });
+  res.status(status).json({ error: err instanceof HttpError ? err.message : 'เกิดข้อผิดพลาดในระบบ' });
 });
 
 module.exports = app;
