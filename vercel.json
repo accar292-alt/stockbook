@@ -3,5 +3,13 @@
   "framework": null,
   "buildCommand": "",
   "outputDirectory": "public",
-  "rewrites": [{ "source": "/api/(.*)", "destination": "/api" }]
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api"
+    }
+  ],
+  "regions": [
+    "hnd1"
+  ]
 }
