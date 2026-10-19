@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>รายงานหนังสือต่ำกว่าขั้นต่ำ</title>
+<style>
+  @page { size: A4; margin: 15mm; }
+  body { font-family: "Leelawadee UI", "Segoe UI", Tahoma, sans-serif; font-size: 12pt; line-height: 1.5; color: #000; margin: 0; background: #e9ecf0; }
+  .page { background: #fff; max-width: 190mm; margin: 16px auto; padding: 12mm; }
+  .tools { max-width: 190mm; margin: 16px auto 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .tools button { font: inherit; padding: 8px 16px; cursor: pointer; }
+  .tools .hint { color: #555; font-size: .85em; }
+  h1 { font-size: 1.25em; text-align: center; margin: 0; }
+  h2 { font-size: 1.35em; text-align: center; margin: 6px 0 4px; }
+  .sub { text-align: center; margin-bottom: 14px; }
+  table { width: 100%; border-collapse: collapse; }
+  thead { display: table-header-group; } /* พิมพ์หัวตารางซ้ำทุกหน้า */
+  tr { page-break-inside: avoid; }
+  th, td { border: 1px solid #000; padding: 4px 8px; }
+  th { background: #eee; }
+  .c { text-align: center; } .r { text-align: right; white-space: nowrap; }
+  .zero td { font-weight: 700; }
+  .foot { margin-top: 14px; font-size: .8em; color: #555; }
+  @media print { body { background: #fff; } .tools { display: none; } .page { margin: 0; padding: 0; max-width: none; } }
+</style>
+</head>
+<body>
+<div class="tools">
+  <button onclick="window.print()">🖨 พิมพ์ / บันทึกเป็น PDF</button><button onclick="window.close()">ปิด</button>
+  <span class="hint">ต้องการไฟล์ PDF: กดพิมพ์ แล้วเลือกเครื่องพิมพ์เป็น "Save as PDF" / "Microsoft Print to PDF"</span>
+</div>
+<div class="page" id="page">กำลังโหลด...</div>
+<script>
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const num = (n) => Number(n).toLocaleString('th-TH');
+const thaiDateTime = (d) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear() + 543} `
+  + `เวลา ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} น.`;
+(async () => {
+  const page = document.getElementById('page');
+  const [stateRes, booksRes] = await Promise.all([fetch('/api/state'), fetch('/api/books')]);
+  const state = await stateRes.json(), books = await booksRes.json();
+  if (!booksRes.ok) { page.textContent = books.error || 'โหลดข้อมูลไม่ได้ — กรุณาเข้าสู่ระบบก่อน'; return; }
+  const low = books.filter((b) => b.active && b.min_qty > 0 && b.stock < b.min_qty)
+    .sort((a, b) => a.stock - b.stock || a.code.localeCompare(b.code)); // หมดก่อน แล้วเรียงตามรหัส
+  const now = thaiDateTime(new Date());
+  document.title = 'รายงานหนังสือต่ำกว่าขั้นต่ำ ' + now.slice(0, 10).replace(/\//g, '-');
+  page.innerHTML = `<h1>${esc(state.orgName)}</h1><h2>รายงานหนังสือที่ยอดคงเหลือต่ำกว่าขั้นต่ำ</h2>
+    <div class="sub">ณ วันที่ ${now} — จำนวน ${num(low.length)} รายการ</div>
+    ${low.length ? `<table><thead><tr><th style="width:40px">ลำดับ</th><th style="width:90px">รหัส</th><th>ชื่อหนังสือ</th>
+      <th style="width:70px">คงเหลือ</th><th style="width:70px">ขั้นต่ำ</th><th style="width:70px">ขาดอีก</th><th style="width:50px">หน่วย</th></tr></thead>
+      <tbody>${low.map((b, i) => `<tr class="${b.stock <= 0 ? 'zero' : ''}"><td class="c">${i + 1}</td><td>${esc(b.code)}</td><td>${esc(b.name)}${b.stock <= 0 ? ' (หมด)' : ''}</td>
+        <td class="r">${num(b.stock)}</td><td class="r">${num(b.min_qty)}</td><td class="r">${num(b.min_qty - b.stock)}</td><td class="c">${esc(b.unit)}</td></tr>`).join('')}</tbody></table>`
+      : '<p class="sub">✔ ไม่มีหนังสือที่ยอดคงเหลือต่ำกว่าขั้นต่ำ</p>'}
+    <div class="foot">พิมพ์โดย ${esc(state.user?.name ?? '')}</div>`;
+})();
+</script>
+</body>
+</html>
