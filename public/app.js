@@ -115,11 +115,11 @@ views.stock = async () => {
     <div class="stats"><div class="stat">จำนวนรายการ<b>${num(books.length)}</b></div>
       <div class="stat">ยอดรวมทั้งหมด<b>${num(books.reduce((s, b) => s + b.stock, 0))}</b></div>
       <div class="stat ${low ? 'warn' : ''}">ต่ำกว่าขั้นต่ำ<b>${num(low)}</b></div></div>
-    ${low ? `<div class="card alert">⚠ มีหนังสือ <b>${num(low)}</b> รายการ ที่ยอดคงเหลือต่ำกว่าขั้นต่ำ <button class="btn sm" id="showLow">ดูรายการ</button> <a class="btn" style="padding:4px 9px;font-size:.85em" href="/api/export/stock.xlsx?low=1">ส่งออก Excel</a></div>` : ''}
+    ${low ? `<div class="card alert">⚠ มีหนังสือ <b>${num(low)}</b> รายการ ที่ยอดคงเหลือต่ำกว่าขั้นต่ำ <button class="btn sm" id="showLow">ดูรายการ</button>${isAdmin() ? ' <a class="btn" style="padding:4px 9px;font-size:.85em" href="/api/export/stock.xlsx?low=1">ส่งออก Excel</a>' : ''}</div>` : ''}
     <div class="card"><div class="bar">
       <label class="grow">ค้นหา<input id="q" placeholder="รหัสหรือชื่อหนังสือ" autofocus></label>
       <label class="check"><input type="checkbox" id="onlyLow"> เฉพาะที่ต่ำกว่าขั้นต่ำ</label>
-      <a class="btn" href="/api/export/stock.xlsx">ส่งออก Excel</a></div>
+      ${isAdmin() ? '<a class="btn" href="/api/export/stock.xlsx">ส่งออก Excel</a>' : ''}</div>
     <div class="tablewrap"><table><thead><tr><th>รหัส</th><th>ชื่อหนังสือ</th><th class="num">คงเหลือ</th><th>หน่วย</th><th class="num">ขั้นต่ำ</th></tr></thead><tbody id="rows"></tbody></table></div>
     <p class="mute">คลิกที่รายการเพื่อดูบัตรสต็อก (ประวัติรับ-เบิกของหนังสือเล่มนั้น)</p></div>`;
   const draw = () => {
@@ -258,7 +258,7 @@ views.report = async () => {
     <label>ตั้งแต่<input type="date" id="from" value="${t.slice(0, 8)}01"></label><label>ถึง<input type="date" id="to" value="${t}"></label>
     <label class="check"><input type="checkbox" id="moved" checked> เฉพาะที่มีความเคลื่อนไหว</label>
     <button class="btn" id="run">แสดงรายงาน</button>
-    <a class="btn" id="xSummary">Excel: สรุป</a><a class="btn" id="xMoves">Excel: รายการทั้งหมด</a>
+    ${isAdmin() ? '<a class="btn" id="xSummary">Excel: สรุป</a><a class="btn" id="xMoves">Excel: รายการทั้งหมด</a>' : ''}
     <button class="btn ghost" onclick="window.print()">พิมพ์</button></div>
     <div class="tablewrap"><table><thead><tr><th>รหัส</th><th>ชื่อหนังสือ</th><th class="num">ยกมา</th><th class="num">รับ</th><th class="num">เบิก</th><th class="num">ชำรุด/เสียหาย</th><th class="num">คงเหลือ</th></tr></thead><tbody id="rows"></tbody><tfoot id="foot"></tfoot></table></div></div>`;
   let data = [];
@@ -272,8 +272,10 @@ views.report = async () => {
   };
   const load = async () => {
     const p = new URLSearchParams({ from: $('#from').value, to: $('#to').value });
-    $('#xSummary').href = '/api/export/summary.xlsx?' + p;
-    $('#xMoves').href = '/api/export/movements.xlsx?' + p;
+    if (isAdmin()) {
+      $('#xSummary').href = '/api/export/summary.xlsx?' + p;
+      $('#xMoves').href = '/api/export/movements.xlsx?' + p;
+    }
     data = await api('/api/report/summary?' + p);
     draw();
   };

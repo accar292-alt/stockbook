@@ -387,6 +387,7 @@ app.post('/api/docs/:id/cancel', admin, async (req, res) => {
 });
 
 // ---------- reports ----------
+// ส่งออก Excel ได้เฉพาะผู้ดูแล (เจ้าหน้าที่ดูรายงานบนหน้าจอและพิมพ์ได้ แต่ดาวน์โหลดไฟล์ไม่ได้)
 async function summary(from, to) {
   return (await db.all(`
     SELECT b.id, b.code, b.name, b.unit,
@@ -416,7 +417,7 @@ function sendXlsx(res, filename, sheetName, rows, widths) {
   res.send(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
 }
 
-app.get('/api/export/stock.xlsx', auth, async (req, res) => {
+app.get('/api/export/stock.xlsx', admin, async (req, res) => {
   const rows = [[await setting('org_name')], ['รายงานสต็อกคงเหลือ ณ วันที่ ' + now().slice(0, 10)], [],
     ['รหัส', 'ชื่อหนังสือ', 'หน่วย', 'คงเหลือ', 'ยอดขั้นต่ำ', 'สถานะ']];
   const onlyLow = req.query.low === '1';
@@ -428,7 +429,7 @@ app.get('/api/export/stock.xlsx', auth, async (req, res) => {
   sendXlsx(res, onlyLow ? 'low-stock.xlsx' : 'stock.xlsx', 'คงเหลือ', rows, [12, 60, 8, 10, 12, 16]);
 });
 
-app.get('/api/export/summary.xlsx', auth, async (req, res) => {
+app.get('/api/export/summary.xlsx', admin, async (req, res) => {
   const [from, to] = range(req.query);
   const rows = [[await setting('org_name')], [`รายงานสรุปรับ-เบิก ตั้งแต่ ${from} ถึง ${to}`], [],
     ['รหัส', 'ชื่อหนังสือ', 'หน่วย', 'ยกมา', 'รับ', 'เบิก', 'ชำรุด/เสียหาย', 'คงเหลือ']];
@@ -436,7 +437,7 @@ app.get('/api/export/summary.xlsx', auth, async (req, res) => {
   sendXlsx(res, `summary_${from}_${to}.xlsx`, 'สรุปรับ-เบิก', rows, [12, 60, 8, 10, 10, 10, 14, 10]);
 });
 
-app.get('/api/export/movements.xlsx', auth, async (req, res) => {
+app.get('/api/export/movements.xlsx', admin, async (req, res) => {
   const [from, to] = range(req.query);
   const rows = [[await setting('org_name')], [`รายการรับ-เบิก ตั้งแต่ ${from} ถึง ${to}`], [],
     ['วันที่', 'เลขที่เอกสาร', 'ประเภท', 'รหัส', 'ชื่อหนังสือ', 'จำนวน', 'หน่วย', 'ผู้เบิก/ใบรับงาน/ผู้รายงาน', 'ใบสั่งซื้อเลขที่', 'หน่วยงาน', 'สาเหตุ', 'หมายเหตุ', 'ผู้บันทึก']];
