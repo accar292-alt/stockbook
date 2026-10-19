@@ -152,10 +152,12 @@ async function showCard(bookId) {
 // ---------- บันทึกรับเข้า / เบิกออก ----------
 function docForm(type, saved) {
   const T = TYPES[type], isOut = type !== 'IN', items = []; // isOut = ยอดลดลง (เบิกจ่าย / ตัดชำรุด); items: {book, qty}
+  // ชื่อผู้รับ / ผู้เบิก / ผู้รายงาน = ผู้ที่ login อยู่ (แก้ไม่ได้ เซิร์ฟเวอร์ใช้ชื่อจากบัญชีเสมอ)
+  const me = (label) => `<label>${label}<input class="locked" value="${esc(state.user.name)}" readonly tabindex="-1"></label>`;
   const fields = {
-    IN: '<label>รับจากใบรับงานเลขที่<input id="party"></label>',
-    OUT: '<label>ผู้เบิก *<input id="party"></label><label>ใบสั่งซื้อเลขที่<input id="po_no"></label><label>ชื่อหน่วยงาน<input id="dept"></label>',
-    DMG: `<label>สาเหตุ *<select id="reason"><option value="">— เลือกสาเหตุ —</option>${DMG_REASONS.map((r) => `<option>${r}</option>`).join('')}</select></label><label>ผู้รายงาน *<input id="party"></label>`,
+    IN: me('ผู้รับเข้า') + '<label>รับจากใบรับงานเลขที่<input id="party"></label>',
+    OUT: me('ผู้เบิก') + '<label>ใบสั่งซื้อเลขที่<input id="po_no"></label><label>ชื่อหน่วยงาน<input id="dept"></label>',
+    DMG: `<label>สาเหตุ *<select id="reason"><option value="">— เลือกสาเหตุ —</option>${DMG_REASONS.map((r) => `<option>${r}</option>`).join('')}</select></label>` + me('ผู้รายงาน'),
   }[type];
   main.innerHTML = `<div class="doc-head ${T.cls}"><span class="sign">${T.sign}</span>
       <div><h2>${T.title}</h2><p>${T.desc}</p></div></div>
@@ -206,7 +208,7 @@ function docForm(type, saved) {
     const slip = isOut ? window.open('about:blank') : null;
     try {
       const doc = await api('/api/docs', 'POST', {
-        type, date: $('#date').value, party: $('#party').value, po_no: $('#po_no')?.value ?? '', dept: $('#dept')?.value ?? '', reason: $('#reason')?.value ?? '', note: $('#note').value,
+        type, date: $('#date').value, party: $('#party')?.value ?? '', po_no: $('#po_no')?.value ?? '', dept: $('#dept')?.value ?? '', reason: $('#reason')?.value ?? '', note: $('#note').value,
         items: items.map((it) => ({ book_id: it.book.id, qty: it.qty })) });
       toast(`บันทึกเอกสาร ${doc.doc_no} แล้ว`);
       if (slip) slip.location = `/slip.html?id=${doc.id}`;
@@ -215,7 +217,7 @@ function docForm(type, saved) {
     } catch (err) { slip?.close(); $('#err').textContent = err.message; btn.disabled = false; }
   };
   draw();
-  (type === 'DMG' ? $('#reason') : $('#party')).focus();
+  ({ IN: $('#party'), OUT: $('#po_no'), DMG: $('#reason') })[type].focus();
 }
 views.in = async () => { await loadBooks(); docForm('IN'); };
 views.out = async () => { await loadBooks(); docForm('OUT'); };

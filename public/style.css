@@ -102,3 +102,4 @@ nav button.nav-dmg.on { background: #fff; color: var(--dmg); box-shadow: inset 0
 button.btn.dmg { background: var(--dmg); border-color: var(--dmg); }
 button.btn.dmg:hover { background: #912018; }
 .tag.dmg { background: #fde8e7; color: var(--dmg); }
+input.locked { background: #eef1f5; color: var(--text); font-weight: 600; cursor: not-allowed; }

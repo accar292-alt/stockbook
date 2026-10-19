@@ -39,19 +39,22 @@ const num = (n) => Number(n).toLocaleString('th-TH');
   if (!res.ok) { page.textContent = data.error || 'ไม่พบเอกสาร'; return; }
   const d = data.doc, out = d.type === 'OUT', dmg = d.type === 'DMG';
   document.title = d.doc_no;
-  const signs = dmg ? ['ผู้รายงาน', 'ผู้ตรวจสอบ', 'ผู้อนุมัติ'] : out ? ['ผู้เบิก', 'ผู้จ่ายสินค้า', 'ผู้อนุมัติ'] : ['ผู้ส่งมอบ', 'ผู้รับเข้าคลัง', 'ผู้ตรวจสอบ'];
+  // [ตำแหน่ง, ชื่อที่พิมพ์ไว้ในวงเล็บ] — ผู้เบิก/ผู้รายงาน/ผู้รับเข้าคลัง คือผู้ที่ login บันทึกเอกสาร
+  const signs = dmg ? [['ผู้รายงาน', d.party], ['ผู้ตรวจสอบ'], ['ผู้อนุมัติ']]
+    : out ? [['ผู้เบิก', d.party], ['ผู้จ่ายสินค้า'], ['ผู้อนุมัติ']]
+    : [['ผู้ส่งมอบ'], ['ผู้รับเข้าคลัง', d.created_by_name], ['ผู้ตรวจสอบ']];
   page.innerHTML = `${d.cancelled ? '<div class="void">ยกเลิก</div>' : ''}
     <h1>${esc(data.orgName)}</h1><h2>${dmg ? 'ใบตัดสินค้าชำรุด/เสียหาย' : out ? 'ใบเบิกจ่ายสินค้า' : 'ใบรับเข้าสินค้า'}</h2>
     <div class="meta">
-      <div><b>${dmg ? 'ผู้รายงาน' : out ? 'ผู้เบิก' : 'รับจากใบรับงานเลขที่'}:</b> ${esc(d.party) || '-'}</div><div><b>เลขที่:</b> ${esc(d.doc_no)}</div>
-      <div>${out ? `<b>ชื่อหน่วยงาน:</b> ${esc(d.dept) || '-'}` : dmg ? `<b>สาเหตุ:</b> ${esc(d.reason) || '-'}` : ''}</div><div><b>วันที่:</b> ${fmtDate(d.date)}</div>
+      <div><b>${dmg ? 'ผู้รายงาน' : out ? 'ผู้เบิก' : 'ผู้รับเข้า'}:</b> ${esc(out || dmg ? d.party : d.created_by_name) || '-'}</div><div><b>เลขที่:</b> ${esc(d.doc_no)}</div>
+      <div>${out ? `<b>ชื่อหน่วยงาน:</b> ${esc(d.dept) || '-'}` : dmg ? `<b>สาเหตุ:</b> ${esc(d.reason) || '-'}` : `<b>รับจากใบรับงานเลขที่:</b> ${esc(d.party) || '-'}`}</div><div><b>วันที่:</b> ${fmtDate(d.date)}</div>
       ${out ? `<div style="grid-column:1/3"><b>ใบสั่งซื้อเลขที่:</b> ${esc(d.po_no) || '-'}</div>` : ''}
       <div style="grid-column:1/3"><b>หมายเหตุ:</b> ${esc(d.note) || '-'}</div>
     </div>
     <table><thead><tr><th style="width:40px">ลำดับ</th><th style="width:90px">รหัส</th><th>รายการ</th><th style="width:80px">จำนวน</th><th style="width:60px">หน่วย</th></tr></thead>
     <tbody>${d.items.map((it, i) => `<tr><td class="c">${i + 1}</td><td>${esc(it.code)}</td><td>${esc(it.name)}</td><td class="r">${num(it.qty)}</td><td class="c">${esc(it.unit)}</td></tr>`).join('')}</tbody>
     <tfoot><tr><th colspan="3" class="r">รวม ${d.items.length} รายการ</th><th class="r">${num(d.items.reduce((s, it) => s + it.qty, 0))}</th><th></th></tr></tfoot></table>
-    <div class="signs">${signs.map((s) => `<div>ลงชื่อ ..............................................<br>( .............................................. )<br>${s}<br>วันที่ ......... / ......... / .........</div>`).join('')}</div>
+    <div class="signs">${signs.map(([s, name]) => `<div>ลงชื่อ ..............................................<br>( ${name ? esc(name) : '..............................................'} )<br>${s}<br>วันที่ ......... / ......... / .........</div>`).join('')}</div>
     <div class="foot">บันทึกโดย ${esc(d.created_by_name)}${d.cancelled ? ` · ยกเลิกโดย ${esc(d.cancelled_by_name)}` : ''}</div>`;
 })();
 </script>

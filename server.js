@@ -309,11 +309,10 @@ app.get('/api/books/:id/card', auth, async (req, res) => {
 app.post('/api/docs', auth, async (req, res) => {
   const type = DOC_PREFIX[req.body.type] ? req.body.type : fail(400, 'ประเภทเอกสารไม่ถูกต้อง');
   const date = isDate(req.body.date) ? req.body.date : fail(400, 'วันที่ไม่ถูกต้อง');
-  const party = str(req.body.party, 120), po_no = str(req.body.po_no, 120), dept = str(req.body.dept, 120), note = str(req.body.note, 300);
+  // ผู้เบิก / ผู้รายงาน = ผู้ที่ login อยู่เสมอ, ใบรับเก็บเลขที่ใบรับงานในช่อง party (ผู้รับ = created_by)
+  const party = type === 'IN' ? str(req.body.party, 120) : req.user.name, po_no = str(req.body.po_no, 120), dept = str(req.body.dept, 120), note = str(req.body.note, 300);
   const reason = type === 'DMG' ? str(req.body.reason, 40) : '';
-  if (type === 'OUT' && !party) fail(400, 'กรอกชื่อผู้เบิก');
   if (type === 'DMG' && !DMG_REASONS.includes(reason)) fail(400, 'เลือกสาเหตุ');
-  if (type === 'DMG' && !party) fail(400, 'กรอกชื่อผู้รายงาน');
   if (!Array.isArray(req.body.items) || !req.body.items.length) fail(400, 'ยังไม่มีรายการหนังสือ');
   const items = new Map(); // รวมรายการซ้ำของหนังสือเล่มเดียวกัน
   for (const it of req.body.items) {
