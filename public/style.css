@@ -2,7 +2,7 @@
         --in: #17803d; --out: #b45309; --bad: #c62828; }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; font-family: "Leelawadee UI", "Segoe UI", Tahoma, sans-serif; font-size: 12pt; line-height: 1.5; color: var(--text); background: var(--bg); }
+body { margin: 0; font-family: "Browallia New", BrowalliaUPC, "Leelawadee UI", "Segoe UI", Tahoma, sans-serif; font-size: 16pt; font-size-adjust: 0.34; line-height: 1.35; color: var(--text); background: var(--bg); }
 header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; background: var(--pri); color: #fff; padding: 8px 16px; }
 .brand { font-weight: 700; font-size: 1.15em; }
 nav { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
