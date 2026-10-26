@@ -420,9 +420,15 @@ function range(q) {
 }
 app.get('/api/report/summary', auth, async (req, res) => res.json(await summary(...range(req.query))));
 
-function sendXlsx(res, filename, sheetName, rows, widths) {
+// priceCol = คอลัมน์ราคาปก (เริ่ม 0) ให้แสดงแบบ #,##0.00 — เป็นข้อมูลอ้างอิง ไม่มีสูตรคำนวณ
+function sendXlsx(res, filename, sheetName, rows, widths, priceCol) {
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws['!cols'] = widths.map((wch) => ({ wch }));
+  if (priceCol !== undefined)
+    for (let r = 4; r < rows.length; r++) {
+      const cell = ws[XLSX.utils.encode_cell({ r, c: priceCol })];
+      if (cell && cell.t === 'n') cell.z = '#,##0.00';
+    }
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -432,35 +438,35 @@ function sendXlsx(res, filename, sheetName, rows, widths) {
 
 app.get('/api/export/stock.xlsx', admin, async (req, res) => {
   const rows = [[await setting('org_name')], ['รายงานสต็อกคงเหลือ ณ วันที่ ' + now().slice(0, 10)], [],
-    ['รหัส', 'ชื่อหนังสือ', 'หน่วย', 'คงเหลือ', 'ยอดขั้นต่ำ', 'สถานะ']];
+    ['รหัส', 'ชื่อหนังสือ', 'หน่วย', 'ราคาปก (บาท)', 'คงเหลือ', 'ยอดขั้นต่ำ', 'สถานะ']];
   const onlyLow = req.query.low === '1';
   if (onlyLow) rows[1] = ['รายงานหนังสือที่ยอดคงเหลือต่ำกว่าขั้นต่ำ ณ วันที่ ' + now().slice(0, 10)];
   for (const b of await listBooks()) {
     const low = b.min_qty > 0 && b.stock < b.min_qty;
-    if (b.active && (low || !onlyLow)) rows.push([b.code, b.name, b.unit, b.stock, b.min_qty, low ? 'ต่ำกว่าขั้นต่ำ' : '']);
+    if (b.active && (low || !onlyLow)) rows.push([b.code, b.name, b.unit, b.price, b.stock, b.min_qty, low ? 'ต่ำกว่าขั้นต่ำ' : '']);
   }
-  sendXlsx(res, onlyLow ? 'low-stock.xlsx' : 'stock.xlsx', 'คงเหลือ', rows, [12, 60, 8, 10, 12, 16]);
+  sendXlsx(res, onlyLow ? 'low-stock.xlsx' : 'stock.xlsx', 'คงเหลือ', rows, [12, 60, 8, 13, 10, 12, 16], 3);
 });
 
 app.get('/api/export/summary.xlsx', admin, async (req, res) => {
   const [from, to] = range(req.query);
   const rows = [[await setting('org_name')], [`รายงานสรุปรับ-เบิก ตั้งแต่ ${from} ถึง ${to}`], [],
-    ['รหัส', 'ชื่อหนังสือ', 'หน่วย', 'ยกมา', 'รับ', 'เบิก', 'ชำรุด/เสียหาย', 'คงเหลือ']];
-  for (const r of await summary(from, to)) rows.push([r.code, r.name, r.unit, r.opening, r.qty_in, r.qty_out, r.qty_dmg, r.closing]);
-  sendXlsx(res, `summary_${from}_${to}.xlsx`, 'สรุปรับ-เบิก', rows, [12, 60, 8, 10, 10, 10, 14, 10]);
+    ['รหัส', 'ชื่อหนังสือ', 'หน่วย', 'ราคาปก (บาท)', 'ยกมา', 'รับ', 'เบิก', 'ชำรุด/เสียหาย', 'คงเหลือ']];
+  for (const r of await summary(from, to)) rows.push([r.code, r.name, r.unit, r.price, r.opening, r.qty_in, r.qty_out, r.qty_dmg, r.closing]);
+  sendXlsx(res, `summary_${from}_${to}.xlsx`, 'สรุปรับ-เบิก', rows, [12, 60, 8, 13, 10, 10, 10, 14, 10], 3);
 });
 
 app.get('/api/export/movements.xlsx', admin, async (req, res) => {
   const [from, to] = range(req.query);
   const rows = [[await setting('org_name')], [`รายการรับ-เบิก ตั้งแต่ ${from} ถึง ${to}`], [],
-    ['วันที่', 'เลขที่เอกสาร', 'ประเภท', 'รหัส', 'ชื่อหนังสือ', 'จำนวน', 'หน่วย', 'ผู้เบิก/ใบรับงาน/ผู้รายงาน', 'ใบสั่งซื้อเลขที่', 'หน่วยงาน', 'สาเหตุ', 'หมายเหตุ', 'ผู้บันทึก']];
-  const data = await db.all(`SELECT d.date, d.doc_no, d.type, b.code, b.name, i.qty, b.unit, d.party, d.po_no, d.dept, d.reason, d.note, u.name uname
+    ['วันที่', 'เลขที่เอกสาร', 'ประเภท', 'รหัส', 'ชื่อหนังสือ', 'ราคาปก (บาท)', 'จำนวน', 'หน่วย', 'ผู้เบิก/ใบรับงาน/ผู้รายงาน', 'ใบสั่งซื้อเลขที่', 'หน่วยงาน', 'สาเหตุ', 'หมายเหตุ', 'ผู้บันทึก']];
+  const data = await db.all(`SELECT d.date, d.doc_no, d.type, b.code, b.name, b.price, i.qty, b.unit, d.party, d.po_no, d.dept, d.reason, d.note, u.name uname
                              FROM doc_items i JOIN docs d ON d.id = i.doc_id JOIN books b ON b.id = i.book_id
                              JOIN users u ON u.id = d.created_by
                              WHERE d.cancelled = 0 AND d.date BETWEEN ? AND ? ORDER BY d.date, d.id, i.id`, from, to);
   for (const r of data)
-    rows.push([r.date, r.doc_no, DOC_PREFIX[r.type], r.code, r.name, r.qty, r.unit, r.party, r.po_no, r.dept, r.reason, r.note, r.uname]);
-  sendXlsx(res, `movements_${from}_${to}.xlsx`, 'รายการ', rows, [12, 16, 8, 12, 60, 8, 8, 24, 20, 28, 12, 30, 20]);
+    rows.push([r.date, r.doc_no, DOC_PREFIX[r.type], r.code, r.name, r.price, r.qty, r.unit, r.party, r.po_no, r.dept, r.reason, r.note, r.uname]);
+  sendXlsx(res, `movements_${from}_${to}.xlsx`, 'รายการ', rows, [12, 16, 8, 12, 60, 13, 8, 8, 24, 20, 28, 12, 30, 20], 5);
 });
 
 // ---------- errors ----------
