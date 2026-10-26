@@ -155,7 +155,8 @@ async function showCard(bookId) {
 
 // ---------- บันทึกรับเข้า / เบิกออก ----------
 function docForm(type, saved) {
-  const T = TYPES[type], isOut = type !== 'IN', items = []; // isOut = ยอดลดลง (เบิกจ่าย / ตัดชำรุด); items: {book, qty}
+  const T = TYPES[type], isOut = type !== 'IN', items = [];
+  const showPrice = type === 'OUT'; // หน้าเบิกจ่ายแสดงราคาปกให้ดูอย่างเดียว ไม่นำไปคำนวณยอดรวม // isOut = ยอดลดลง (เบิกจ่าย / ตัดชำรุด); items: {book, qty}
   // ชื่อผู้รับ / ผู้เบิก / ผู้รายงาน = ผู้ที่ login อยู่ (แก้ไม่ได้ เซิร์ฟเวอร์ใช้ชื่อจากบัญชีเสมอ)
   const me = (label) => `<label>${label}<input class="locked" value="${esc(state.user.name)}" readonly tabindex="-1"></label>`;
   const fields = {
@@ -172,8 +173,8 @@ function docForm(type, saved) {
       <label>หมายเหตุ${type === 'DMG' ? ' (รายละเอียดความเสียหาย)' : ''}<input id="note"></label>
     </div>
     <div class="picker"><label>เพิ่มหนังสือ (พิมพ์รหัสหรือชื่อ แล้วกด Enter หรือคลิกเลือก)<input id="pick" autocomplete="off" placeholder="ค้นหาหนังสือ..."></label><div class="sugg" id="sugg" hidden></div></div>
-    <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>#</th><th>รหัส</th><th>ชื่อหนังสือ</th><th class="num">คงเหลือ</th><th class="num">${T.qty}</th><th></th></tr></thead><tbody id="items"></tbody>
-      <tfoot><tr><th colspan="4" class="num">รวม</th><th class="num" id="total">0</th><th></th></tr></tfoot></table></div>
+    <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>#</th><th>รหัส</th><th>ชื่อหนังสือ</th><th class="num">คงเหลือ</th>${showPrice ? '<th class="num">ราคาปก (บาท)</th>' : ''}<th class="num">${T.qty}</th><th></th></tr></thead><tbody id="items"></tbody>
+      <tfoot><tr><th colspan="${showPrice ? 5 : 4}" class="num">รวมจำนวน</th><th class="num" id="total">0</th><th></th></tr></tfoot></table></div>
     <div class="err" id="err"></div>
     <div class="actions"><button class="btn big ${T.cls}" id="save">${T.save}</button></div></div>`;
   const pick = $('#pick'), sugg = $('#sugg');
@@ -181,10 +182,10 @@ function docForm(type, saved) {
   const total = () => ($('#total').textContent = num(items.reduce((s, it) => s + (Number(it.qty) || 0), 0)));
   const draw = () => {
     $('#items').innerHTML = items.map((it, i) => `<tr><td>${i + 1}</td><td>${esc(it.book.code)}</td><td>${esc(it.book.name)}</td>
-      <td class="num">${num(it.book.stock)}</td>
+      <td class="num">${num(it.book.stock)}</td>${showPrice ? `<td class="num">${baht(it.book.price)}</td>` : ''}
       <td class="num"><input type="number" min="1" ${isOut ? `max="${it.book.stock}"` : ''} value="${it.qty}" data-i="${i}" style="width:100px;text-align:right"></td>
       <td><button class="btn danger sm" data-del="${i}">ลบ</button></td></tr>`).join('')
-      || '<tr><td colspan="6" class="mute">ยังไม่มีรายการ</td></tr>';
+      || `<tr><td colspan="${showPrice ? 7 : 6}" class="mute">ยังไม่มีรายการ</td></tr>`;
     total();
   };
   const add = (book) => {
@@ -196,7 +197,7 @@ function docForm(type, saved) {
   pick.oninput = () => {
     const q = pick.value.trim().toLowerCase();
     matches = q ? state.books.filter((b) => b.active && (b.code + ' ' + b.name).toLowerCase().includes(q)).slice(0, 12) : [];
-    sugg.innerHTML = matches.map((b, i) => `<div data-i="${i}" class="${i ? '' : 'on'}"><span>${esc(b.code)} — ${esc(b.name)}</span><span class="mute">คงเหลือ ${num(b.stock)}</span></div>`).join('');
+    sugg.innerHTML = matches.map((b, i) => `<div data-i="${i}" class="${i ? '' : 'on'}"><span>${esc(b.code)} — ${esc(b.name)}</span><span class="mute">คงเหลือ ${num(b.stock)}${showPrice ? ` · ราคาปก ${baht(b.price)} บาท` : ''}</span></div>`).join('');
     sugg.hidden = !matches.length;
   };
   pick.onkeydown = (e) => { if (e.key === 'Enter' && matches[0]) { e.preventDefault(); add(matches[0]); } };
