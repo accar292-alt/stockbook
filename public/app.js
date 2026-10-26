@@ -156,7 +156,7 @@ async function showCard(bookId) {
 // ---------- บันทึกรับเข้า / เบิกออก ----------
 function docForm(type, saved) {
   const T = TYPES[type], isOut = type !== 'IN', items = [];
-  const showPrice = type === 'OUT'; // หน้าเบิกจ่ายแสดงราคาปกให้ดูอย่างเดียว ไม่นำไปคำนวณยอดรวม // isOut = ยอดลดลง (เบิกจ่าย / ตัดชำรุด); items: {book, qty}
+  const showPrice = type === 'OUT' || type === 'IN'; // หน้าเบิกจ่าย/รับเข้าแสดงราคาปกให้ดูอย่างเดียว ไม่นำไปคำนวณยอดรวม // isOut = ยอดลดลง (เบิกจ่าย / ตัดชำรุด); items: {book, qty}
   // ชื่อผู้รับ / ผู้เบิก / ผู้รายงาน = ผู้ที่ login อยู่ (แก้ไม่ได้ เซิร์ฟเวอร์ใช้ชื่อจากบัญชีเสมอ)
   const me = (label) => `<label>${label}<input class="locked" value="${esc(state.user.name)}" readonly tabindex="-1"></label>`;
   const fields = {
