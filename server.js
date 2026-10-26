@@ -403,7 +403,7 @@ app.post('/api/docs/:id/cancel', admin, async (req, res) => {
 // ส่งออก Excel ได้เฉพาะผู้ดูแล (เจ้าหน้าที่ดูรายงานบนหน้าจอและพิมพ์ได้ แต่ดาวน์โหลดไฟล์ไม่ได้)
 async function summary(from, to) {
   return (await db.all(`
-    SELECT b.id, b.code, b.name, b.unit,
+    SELECT b.id, b.code, b.name, b.unit, b.price,
       COALESCE(SUM(CASE WHEN d.date < ? THEN ${SIGNED} END), 0) opening,
       COALESCE(SUM(CASE WHEN d.date BETWEEN ? AND ? AND d.type = 'IN' THEN i.qty END), 0) qty_in,
       COALESCE(SUM(CASE WHEN d.date BETWEEN ? AND ? AND d.type = 'OUT' THEN i.qty END), 0) qty_out,

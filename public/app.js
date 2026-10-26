@@ -265,15 +265,15 @@ views.report = async () => {
     <button class="btn" id="run">แสดงรายงาน</button>
     ${isAdmin() ? '<a class="btn" id="xSummary">Excel: สรุป</a><a class="btn" id="xMoves">Excel: รายการทั้งหมด</a>' : ''}
     <button class="btn ghost" onclick="window.print()">พิมพ์</button></div>
-    <div class="tablewrap"><table><thead><tr><th>รหัส</th><th>ชื่อหนังสือ</th><th class="num">ยกมา</th><th class="num">รับ</th><th class="num">เบิก</th><th class="num">ชำรุด/เสียหาย</th><th class="num">คงเหลือ</th></tr></thead><tbody id="rows"></tbody><tfoot id="foot"></tfoot></table></div></div>`;
+    <div class="tablewrap"><table><thead><tr><th>รหัส</th><th>ชื่อหนังสือ</th><th class="num">ราคาปก (บาท)</th><th class="num">ยกมา</th><th class="num">รับ</th><th class="num">เบิก</th><th class="num">ชำรุด/เสียหาย</th><th class="num">คงเหลือ</th></tr></thead><tbody id="rows"></tbody><tfoot id="foot"></tfoot></table></div></div>`;
   let data = [];
   const draw = () => {
     const rows = data.filter((r) => !$('#moved').checked || r.qty_in || r.qty_out || r.qty_dmg);
     const sum = (k) => num(rows.reduce((s, r) => s + r[k], 0));
-    $('#rows').innerHTML = rows.map((r) => `<tr><td>${esc(r.code)}</td><td>${esc(r.name)}</td><td class="num">${num(r.opening)}</td>
+    $('#rows').innerHTML = rows.map((r) => `<tr><td>${esc(r.code)}</td><td>${esc(r.name)}</td><td class="num">${baht(r.price)}</td><td class="num">${num(r.opening)}</td>
       <td class="num">${num(r.qty_in)}</td><td class="num">${num(r.qty_out)}</td><td class="num">${num(r.qty_dmg)}</td><td class="num"><b>${num(r.closing)}</b></td></tr>`).join('')
-      || '<tr><td colspan="7" class="mute">ไม่มีรายการในช่วงวันที่นี้</td></tr>';
-    $('#foot').innerHTML = `<tr><th colspan="2" class="num">รวม</th><th class="num">${sum('opening')}</th><th class="num">${sum('qty_in')}</th><th class="num">${sum('qty_out')}</th><th class="num">${sum('qty_dmg')}</th><th class="num">${sum('closing')}</th></tr>`;
+      || '<tr><td colspan="8" class="mute">ไม่มีรายการในช่วงวันที่นี้</td></tr>';
+    $('#foot').innerHTML = `<tr><th colspan="2" class="num">รวม</th><th></th><th class="num">${sum('opening')}</th><th class="num">${sum('qty_in')}</th><th class="num">${sum('qty_out')}</th><th class="num">${sum('qty_dmg')}</th><th class="num">${sum('closing')}</th></tr>`;
   };
   const load = async () => {
     const p = new URLSearchParams({ from: $('#from').value, to: $('#to').value });
