@@ -8,6 +8,8 @@ const num = (n) => Number(n || 0).toLocaleString('th-TH');
 const fmtDate = (d) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${Number(d.slice(0, 4)) + 543}` : '');
 const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
 const isLow = (b) => b.min_qty > 0 && b.stock < b.min_qty;
+// ราคาปก — แสดงอย่างเดียว ไม่ใช้คำนวณยอดรับ-เบิก
+const baht = (n) => { const v = Number(n || 0); return v.toLocaleString('th-TH', { minimumFractionDigits: Number.isInteger(v) ? 0 : 2, maximumFractionDigits: 2 }); };
 const isAdmin = () => state.user?.role === 'admin';
 const TYPES = {
   IN: { cls: 'in', sign: '▼', title: 'รับเข้าสินค้า', tag: 'รับ', desc: 'บันทึกรับสินค้าเข้าคลัง — ยอดสต็อกจะเพิ่มขึ้น', slip: 'ใบรับเข้า', save: 'บันทึกรับเข้าสินค้า', qty: 'จำนวนรับ' },
@@ -45,7 +47,7 @@ function formDialog(title, fields, onSubmit) {
       ? `<label class="check"><input type="checkbox" name="${f.name}" ${f.value ? 'checked' : ''}> ${esc(f.label)}</label>`
       : f.type === 'select'
         ? `<label>${esc(f.label)}<select name="${f.name}">${f.options.map(([v, t]) => `<option value="${v}" ${v === f.value ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`
-        : `<label>${esc(f.label)}<input name="${f.name}" type="${f.type || 'text'}" value="${esc(f.value ?? '')}" ${f.required === false ? '' : 'required'} ${f.type === 'number' ? 'min="0"' : ''} autocomplete="${f.type === 'password' ? 'new-password' : 'off'}"></label>`).join('')}
+        : `<label>${esc(f.label)}<input name="${f.name}" type="${f.type || 'text'}" value="${esc(f.value ?? '')}" ${f.required === false ? '' : 'required'} ${f.type === 'number' ? `min="0" step="${f.step ?? 1}"` : ''} autocomplete="${f.type === 'password' ? 'new-password' : 'off'}"></label>`).join('')}
     <div class="err"></div>
     <div class="actions"><button type="button" class="btn ghost" data-close>ยกเลิก</button><button class="btn">บันทึก</button></div></form>`;
   $('[data-close]', dlg).onclick = () => dlg.close();
@@ -121,15 +123,16 @@ views.stock = async () => {
       <label class="check"><input type="checkbox" id="onlyLow"> เฉพาะที่ต่ำกว่าขั้นต่ำ</label>
       <a class="btn" href="/low-stock.html" target="_blank">🖨 พิมพ์รายการต่ำกว่าขั้นต่ำ</a>
       ${isAdmin() ? '<a class="btn" href="/api/export/stock.xlsx">ส่งออก Excel</a>' : ''}</div>
-    <div class="tablewrap"><table><thead><tr><th>รหัส</th><th>ชื่อหนังสือ</th><th class="num">คงเหลือ</th><th>หน่วย</th><th class="num">ขั้นต่ำ</th></tr></thead><tbody id="rows"></tbody></table></div>
+    <div class="tablewrap"><table><thead><tr><th>รหัส</th><th>ชื่อหนังสือ</th><th class="num">คงเหลือ</th><th>หน่วย</th><th class="num">ขั้นต่ำ</th><th class="num">ราคาปก (บาท)</th></tr></thead><tbody id="rows"></tbody></table></div>
     <p class="mute">คลิกที่รายการเพื่อดูบัตรสต็อก (ประวัติรับ-เบิกของหนังสือเล่มนั้น)</p></div>`;
   const draw = () => {
     const q = $('#q').value.trim().toLowerCase(), onlyLow = $('#onlyLow').checked;
     $('#rows').innerHTML = books
       .filter((b) => (!q || (b.code + ' ' + b.name).toLowerCase().includes(q)) && (!onlyLow || isLow(b)))
       .map((b) => `<tr class="click ${b.stock <= 0 ? 'zero' : isLow(b) ? 'low' : ''}" data-id="${b.id}">
-        <td>${esc(b.code)}</td><td>${esc(b.name)}</td><td class="num"><b>${num(b.stock)}</b></td><td>${esc(b.unit)}</td><td class="num">${num(b.min_qty)}</td></tr>`).join('')
-      || '<tr><td colspan="5" class="mute">ไม่พบรายการ</td></tr>';
+        <td>${esc(b.code)}</td><td>${esc(b.name)}</td><td class="num"><b>${num(b.stock)}</b></td><td>${esc(b.unit)}</td><td class="num">${num(b.min_qty)}</td>
+        <td class="num">${baht(b.price)}</td></tr>`).join('')
+      || '<tr><td colspan="6" class="mute">ไม่พบรายการ</td></tr>';
   };
   $('#q').oninput = $('#onlyLow').onchange = draw;
   $('#rows').onclick = (e) => { const tr = e.target.closest('tr[data-id]'); if (tr) showCard(tr.dataset.id); };
@@ -291,17 +294,19 @@ views.books = async () => {
   main.innerHTML = `<h2>จัดการรายชื่อหนังสือ</h2><div class="card"><div class="bar">
     <label class="grow">ค้นหา<input id="q" placeholder="รหัสหรือชื่อหนังสือ"></label><button class="btn" id="add">+ เพิ่มหนังสือ</button></div>
     <p class="mute">แก้ยอดขั้นต่ำของแต่ละเล่มได้ในช่อง "ขั้นต่ำ" โดยตรง ระบบจะเตือนเมื่อคงเหลือต่ำกว่าจำนวนนี้ (0 = ไม่เตือน)</p>
-    <div class="tablewrap"><table><thead><tr><th>รหัส</th><th>ชื่อหนังสือ</th><th>หน่วย</th><th class="num">ขั้นต่ำ</th><th>สถานะ</th><th></th></tr></thead><tbody id="rows"></tbody></table></div></div>`;
+    <div class="tablewrap"><table><thead><tr><th>รหัส</th><th>ชื่อหนังสือ</th><th>หน่วย</th><th class="num">ขั้นต่ำ</th><th class="num">ราคาปก (บาท)</th><th>สถานะ</th><th></th></tr></thead><tbody id="rows"></tbody></table></div></div>`;
   const edit = (b) => formDialog(b ? 'แก้ไขหนังสือ' : 'เพิ่มหนังสือ', [
     { name: 'code', label: 'รหัส', value: b?.code }, { name: 'name', label: 'ชื่อหนังสือ', value: b?.name },
     { name: 'unit', label: 'หน่วยนับ', value: b?.unit ?? 'เล่ม' },
     { name: 'min_qty', label: 'ยอดขั้นต่ำ (เตือนเมื่อคงเหลือต่ำกว่าจำนวนนี้, 0 = ไม่เตือน)', type: 'number', value: b?.min_qty ?? 500 },
+    { name: 'price', label: 'ราคาปก (บาท)', type: 'number', step: '0.01', value: b?.price ?? 0 },
     { name: 'active', label: 'ใช้งานอยู่', type: 'checkbox', value: b ? b.active : 1 }],
     async (v) => { await api(b ? `/api/books/${b.id}` : '/api/books', b ? 'PUT' : 'POST', v); toast('บันทึกแล้ว'); views.books(); });
   const draw = () => {
     const q = $('#q').value.trim().toLowerCase();
     $('#rows').innerHTML = state.books.filter((b) => !q || (b.code + ' ' + b.name).toLowerCase().includes(q))
       .map((b) => `<tr><td>${esc(b.code)}</td><td>${esc(b.name)}</td><td>${esc(b.unit)}</td><td class="num"><input type="number" min="0" step="1" value="${b.min_qty}" data-min="${b.id}" style="width:110px;text-align:right"></td>
+        <td class="num">${baht(b.price)}</td>
         <td>${b.active ? '<span class="tag in">ใช้งาน</span>' : '<span class="tag off">ปิด</span>'}</td>
         <td><button class="btn ghost sm" data-id="${b.id}">แก้ไข</button></td></tr>`).join('');
   };
