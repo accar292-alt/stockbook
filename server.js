@@ -377,7 +377,7 @@ app.get('/api/docs/:id', auth, async (req, res) => {
                             JOIN users u ON u.id = d.created_by LEFT JOIN users c ON c.id = d.cancelled_by
                             WHERE d.id = ?`, Number(req.params.id));
   if (!doc) fail(404, 'ไม่พบเอกสาร');
-  doc.items = await db.all(`SELECT b.code, b.name, b.unit, i.qty FROM doc_items i JOIN books b ON b.id = i.book_id
+  doc.items = await db.all(`SELECT b.code, b.name, b.unit, b.price, i.qty FROM doc_items i JOIN books b ON b.id = i.book_id
                             WHERE i.doc_id = ? ORDER BY i.id`, doc.id);
   res.json({ doc, orgName: await setting('org_name') });
 });
