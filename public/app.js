@@ -119,23 +119,23 @@ views.stock = async () => {
   main.innerHTML = `<h2>สต็อกคงเหลือ</h2>
     <div class="stats"><div class="stat">จำนวนรายการ<b>${num(books.length)}</b></div>
       <div class="stat">ยอดรวมทั้งหมด<b>${num(books.reduce((s, b) => s + b.stock, 0))}</b></div>
-      <div class="stat ${low ? 'warn' : ''}">ต่ำกว่าขั้นต่ำ<b>${num(low)}</b></div></div>
+      ${isSales() ? '' : `<div class="stat ${low ? 'warn' : ''}">ต่ำกว่าขั้นต่ำ<b>${num(low)}</b></div>`}</div>
     ${low ? `<div class="card alert">⚠ มีหนังสือ <b>${num(low)}</b> รายการ ที่ยอดคงเหลือต่ำกว่าขั้นต่ำ <button class="btn sm" id="showLow">ดูรายการ</button> <a class="btn" style="padding:4px 9px;font-size:.85em" href="/low-stock.html" target="_blank">🖨 พิมพ์ / PDF</a>${isAdmin() ? ' <a class="btn" style="padding:4px 9px;font-size:.85em" href="/api/export/stock.xlsx?low=1">ส่งออก Excel</a>' : ''}</div>` : ''}
     <div class="card"><div class="bar">
       <label class="grow">ค้นหา<input id="q" placeholder="รหัสหรือชื่อหนังสือ" autofocus></label>
-      <label class="check"><input type="checkbox" id="onlyLow"> เฉพาะที่ต่ำกว่าขั้นต่ำ</label>
-      <a class="btn" href="/low-stock.html" target="_blank">🖨 พิมพ์รายการต่ำกว่าขั้นต่ำ</a>
+      <label class="check" ${isSales() ? 'hidden' : ''}><input type="checkbox" id="onlyLow"> เฉพาะที่ต่ำกว่าขั้นต่ำ</label>
+      ${isSales() ? '' : '<a class="btn" href="/low-stock.html" target="_blank">🖨 พิมพ์รายการต่ำกว่าขั้นต่ำ</a>'}
       ${isAdmin() ? '<a class="btn" href="/api/export/stock.xlsx">ส่งออก Excel</a>' : ''}</div>
-    <div class="tablewrap"><table><thead><tr><th>รหัส</th><th>ชื่อหนังสือ</th><th class="num">คงเหลือ</th><th>หน่วย</th><th class="num">ขั้นต่ำ</th><th class="num">ราคาปก (บาท)</th></tr></thead><tbody id="rows"></tbody></table></div>
+    <div class="tablewrap"><table><thead><tr><th>รหัส</th><th>ชื่อหนังสือ</th><th class="num">คงเหลือ</th><th>หน่วย</th>${isSales() ? '' : '<th class="num">ขั้นต่ำ</th>'}<th class="num">ราคาปก (บาท)</th></tr></thead><tbody id="rows"></tbody></table></div>
     <p class="mute" ${isSales() ? 'hidden' : ''}>คลิกที่รายการเพื่อดูบัตรสต็อก (ประวัติรับ-เบิกของหนังสือเล่มนั้น)</p></div>`;
   const draw = () => {
     const q = $('#q').value.trim().toLowerCase(), onlyLow = $('#onlyLow').checked;
     $('#rows').innerHTML = books
       .filter((b) => (!q || (b.code + ' ' + b.name).toLowerCase().includes(q)) && (!onlyLow || isLow(b)))
       .map((b) => `<tr class="${isSales() ? '' : 'click'} ${b.stock <= 0 ? 'zero' : isLow(b) ? 'low' : ''}" data-id="${b.id}">
-        <td>${esc(b.code)}</td><td>${esc(b.name)}</td><td class="num"><b>${num(b.stock)}</b></td><td>${esc(b.unit)}</td><td class="num">${num(b.min_qty)}</td>
+        <td>${esc(b.code)}</td><td>${esc(b.name)}</td><td class="num"><b>${num(b.stock)}</b></td><td>${esc(b.unit)}</td>${isSales() ? '' : `<td class="num">${num(b.min_qty)}</td>`}
         <td class="num">${baht(b.price)}</td></tr>`).join('')
-      || '<tr><td colspan="6" class="mute">ไม่พบรายการ</td></tr>';
+      || `<tr><td colspan="${isSales() ? 5 : 6}" class="mute">ไม่พบรายการ</td></tr>`;
   };
   $('#q').oninput = $('#onlyLow').onchange = draw;
   $('#rows').onclick = (e) => { const tr = e.target.closest('tr[data-id]'); if (tr && !isSales()) showCard(tr.dataset.id); };

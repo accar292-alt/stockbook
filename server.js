@@ -285,7 +285,11 @@ app.put('/api/settings', admin, async (req, res) => {
 
 // ---------- books ----------
 const listBooks = () => db.all(`SELECT b.*, ${STOCK_SQL} AS stock FROM books b ORDER BY b.code`);
-app.get('/api/books', auth, async (req, res) => res.json(await listBooks()));
+// ฝ่ายขายไม่เห็นยอดขั้นต่ำ (ตัดออกจากข้อมูลที่ส่งไปเลย ไม่ใช่แค่ซ่อนบนจอ)
+app.get('/api/books', auth, async (req, res) => {
+  const books = await listBooks();
+  res.json(req.user.role === 'sales' ? books.map(({ min_qty, ...b }) => b) : books);
+});
 
 function bookInput(body) {
   const b = { code: str(body.code, 40), name: str(body.name, 300), unit: str(body.unit, 20) || 'เล่ม',
