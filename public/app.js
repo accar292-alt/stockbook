@@ -368,3 +368,8 @@ views.users = async () => {
 
 document.addEventListener('click', (e) => { if (!e.target.closest('.picker')) { const s = $('#sugg'); if (s) s.hidden = true; } });
 boot().catch((e) => (main.innerHTML = `<div class="card">เชื่อมต่อเซิร์ฟเวอร์ไม่ได้: ${esc(e.message)}</div>`));
+
+// ปุ่มกลับขึ้นด้านบน: แสดงเมื่อเลื่อนลงมาเกิน 300px
+const toTop = $('#toTop');
+window.addEventListener('scroll', () => { toTop.hidden = window.scrollY < 300; }, { passive: true });
+toTop.onclick = () => window.scrollTo({ top: 0, behavior: 'smooth' });

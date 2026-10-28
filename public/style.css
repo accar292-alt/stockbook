@@ -105,3 +105,8 @@ button.btn.dmg:hover { background: #912018; }
 input.locked { background: #eef1f5; color: var(--text); font-weight: 600; cursor: not-allowed; }
 button.btn:disabled { opacity: .45; cursor: not-allowed; }
 .actions { align-items: center; flex-wrap: wrap; }
+
+/* ปุ่มกลับขึ้นด้านบน */
+#toTop { position: fixed; right: 20px; bottom: 20px; z-index: 50; width: 46px; height: 46px; border-radius: 50%; border: 0; background: var(--pri); color: #fff; font-size: 1.2em; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+#toTop:hover { background: var(--pri-d); }
+@media print { #toTop { display: none !important; } }
