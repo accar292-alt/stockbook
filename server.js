@@ -183,6 +183,11 @@ app.use('/api', async (req, res, next) => {
   next();
 });
 const auth = (req, res, next) => (req.user ? next() : fail(401, 'กรุณาเข้าสู่ระบบ'));
+// ฝ่ายขาย (sales) ดูรายการหนังสือและยอดคงเหลือได้อย่างเดียว: ห้ามบันทึกเอกสาร ดูประวัติ/รายงาน/บัตรสต็อก
+const staff = (req, res, next) =>
+  !req.user ? fail(401, 'กรุณาเข้าสู่ระบบ') : req.user.role === 'sales' ? fail(403, 'ฝ่ายขายดูรายการหนังสือได้อย่างเดียว') : next();
+const ROLES = ['admin', 'staff', 'sales'];
+const parseRole = (r) => (ROLES.includes(r) ? r : 'staff');
 const admin = (req, res, next) =>
   !req.user ? fail(401, 'กรุณาเข้าสู่ระบบ') : req.user.role === 'admin' ? next() : fail(403, 'เฉพาะผู้ดูแลระบบ');
 
@@ -246,7 +251,7 @@ app.get('/api/users', admin, async (req, res) => {
 
 app.post('/api/users', admin, async (req, res) => {
   const username = str(req.body.username, 40).toLowerCase(), name = str(req.body.name, 80);
-  const role = req.body.role === 'admin' ? 'admin' : 'staff';
+  const role = parseRole(req.body.role);
   if (!username || !name) fail(400, 'กรอกชื่อผู้ใช้และชื่อ-สกุลให้ครบ');
   if (await db.get('SELECT 1 FROM users WHERE username = ?', username)) fail(400, 'ชื่อผู้ใช้นี้มีอยู่แล้ว');
   const { salt, hash } = hashPassword(checkPassword(req.body.password));
@@ -259,7 +264,7 @@ app.put('/api/users/:id', admin, async (req, res) => {
   const u = await db.get('SELECT * FROM users WHERE id = ?', id);
   if (!u || u.username === 'system') fail(404, 'ไม่พบผู้ใช้');
   const name = str(req.body.name ?? u.name, 80) || u.name;
-  const role = req.body.role === undefined ? u.role : req.body.role === 'admin' ? 'admin' : 'staff';
+  const role = req.body.role === undefined ? u.role : parseRole(req.body.role);
   const active = req.body.active === undefined ? u.active : req.body.active ? 1 : 0;
   if (id === req.user.id && (role !== 'admin' || !active)) fail(400, 'ไม่สามารถลดสิทธิ์หรือปิดบัญชีของตนเองได้');
   await db.run('UPDATE users SET name = ?, role = ?, active = ? WHERE id = ?', name, role, active, id);
@@ -307,7 +312,7 @@ app.put('/api/books/:id', admin, async (req, res) => {
 });
 
 // บัตรสต็อก: ความเคลื่อนไหวของหนังสือ 1 เล่ม พร้อมยอดคงเหลือสะสม
-app.get('/api/books/:id/card', auth, async (req, res) => {
+app.get('/api/books/:id/card', staff, async (req, res) => {
   const book = await db.get('SELECT * FROM books WHERE id = ?', Number(req.params.id));
   if (!book) fail(404, 'ไม่พบหนังสือ');
   let balance = 0;
@@ -319,7 +324,7 @@ app.get('/api/books/:id/card', auth, async (req, res) => {
 });
 
 // ---------- documents (ใบรับ / ใบเบิก / ใบตัดชำรุด) ----------
-app.post('/api/docs', auth, async (req, res) => {
+app.post('/api/docs', staff, async (req, res) => {
   const type = DOC_PREFIX[req.body.type] ? req.body.type : fail(400, 'ประเภทเอกสารไม่ถูกต้อง');
   const date = isDate(req.body.date) ? req.body.date : fail(400, 'วันที่ไม่ถูกต้อง');
   // ผู้เบิก / ผู้รายงาน = ผู้ที่ login อยู่เสมอ, ใบรับเก็บเลขที่ใบรับงานในช่อง party (ผู้รับ = created_by)
@@ -363,7 +368,7 @@ function docFilter(q) {
   return { sql: where.length ? 'WHERE ' + where.join(' AND ') : '', args };
 }
 
-app.get('/api/docs', auth, async (req, res) => {
+app.get('/api/docs', staff, async (req, res) => {
   const f = docFilter(req.query);
   res.json(await db.all(`SELECT d.id, d.doc_no, d.type, d.date, d.party, d.po_no, d.dept, d.reason, d.note, d.cancelled, u.name created_by,
                            (SELECT COUNT(*) FROM doc_items i WHERE i.doc_id = d.id) item_count,
@@ -372,7 +377,7 @@ app.get('/api/docs', auth, async (req, res) => {
                          ORDER BY d.date DESC, d.id DESC LIMIT 1000`, ...f.args));
 });
 
-app.get('/api/docs/:id', auth, async (req, res) => {
+app.get('/api/docs/:id', staff, async (req, res) => {
   const doc = await db.get(`SELECT d.*, u.name created_by_name, c.name cancelled_by_name FROM docs d
                             JOIN users u ON u.id = d.created_by LEFT JOIN users c ON c.id = d.cancelled_by
                             WHERE d.id = ?`, Number(req.params.id));
@@ -418,7 +423,7 @@ function range(q) {
   if (!isDate(q.from) || !isDate(q.to) || q.from > q.to) fail(400, 'ช่วงวันที่ไม่ถูกต้อง');
   return [q.from, q.to];
 }
-app.get('/api/report/summary', auth, async (req, res) => res.json(await summary(...range(req.query))));
+app.get('/api/report/summary', staff, async (req, res) => res.json(await summary(...range(req.query))));
 
 // priceCol = คอลัมน์ราคาปก (เริ่ม 0) ให้แสดงแบบ #,##0.00 — เป็นข้อมูลอ้างอิง ไม่มีสูตรคำนวณ
 function sendXlsx(res, filename, sheetName, rows, widths, priceCol) {

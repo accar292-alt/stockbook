@@ -11,6 +11,8 @@ const isLow = (b) => b.min_qty > 0 && b.stock < b.min_qty;
 // ราคาปก — แสดงอย่างเดียว ไม่ใช้คำนวณยอดรับ-เบิก
 const baht = (n) => { const v = Number(n || 0); return v.toLocaleString('th-TH', { minimumFractionDigits: Number.isInteger(v) ? 0 : 2, maximumFractionDigits: 2 }); };
 const isAdmin = () => state.user?.role === 'admin';
+const isSales = () => state.user?.role === 'sales'; // ฝ่ายขาย: ดูรายการหนังสือและยอดคงเหลือได้อย่างเดียว
+const ROLE_LABEL = { admin: 'ผู้ดูแล', staff: 'เจ้าหน้าที่', sales: 'ฝ่ายขาย' };
 const TYPES = {
   IN: { cls: 'in', sign: '▼', title: 'รับเข้าสินค้า', tag: 'รับ', desc: 'บันทึกรับสินค้าเข้าคลัง — ยอดสต็อกจะเพิ่มขึ้น', slip: 'ใบรับเข้า', save: 'บันทึกรับเข้าสินค้า', qty: 'จำนวนรับ' },
   OUT: { cls: 'out', sign: '▲', title: 'เบิกจ่ายสินค้า', tag: 'เบิก', desc: 'บันทึกเบิกจ่ายสินค้าออกจากคลัง — ยอดสต็อกจะลดลง', slip: 'ใบเบิกจ่าย', save: 'บันทึกใบเบิกจ่าย', print: true, qty: 'จำนวนเบิก' },
@@ -71,9 +73,10 @@ async function boot() {
   $('#top').hidden = !s.user;
   if (s.needSetup) return viewAuth(true);
   if (!s.user) return viewAuth(false);
-  $('#whoName').textContent = `${s.user.name} (${isAdmin() ? 'ผู้ดูแล' : 'เจ้าหน้าที่'})`;
+  $('#whoName').textContent = `${s.user.name} (${ROLE_LABEL[s.user.role] ?? s.user.role})`;
   const tabs = [['stock', 'สต็อกคงเหลือ'], ['in', '▼ รับเข้าสินค้า'], ['out', '▲ เบิกจ่ายสินค้า'], ['dmg', '✖ ตัดชำรุด/เสียหาย'], ['docs', 'ประวัติเอกสาร'], ['report', 'รายงาน']];
   if (isAdmin()) tabs.push(['books', 'จัดการหนังสือ'], ['users', state.requireLogin ? 'ผู้ใช้งาน' : 'ตั้งค่า']);
+  if (isSales()) tabs.splice(1); // ฝ่ายขายเห็นแค่เมนูสต็อกคงเหลือ
   $('#nav').innerHTML = tabs.map(([k, t]) => `<button data-view="${k}" class="nav-${k}">${t}</button>`).join('');
   $('#nav').onclick = (e) => { const b = e.target.closest('[data-view]'); if (b) go(b.dataset.view); };
   await loadBooks();
@@ -103,7 +106,7 @@ $('#btnPassword').onclick = () => formDialog('เปลี่ยนรหัส�
 
 const views = {};
 function go(view) {
-  state.view = views[view] ? view : 'stock';
+  state.view = views[view] && $(`#nav [data-view="${view}"]`) ? view : 'stock';
   for (const b of $('#nav').children) b.classList.toggle('on', b.dataset.view === state.view);
   views[state.view]().catch((e) => toast(e.message, true));
 }
@@ -124,18 +127,18 @@ views.stock = async () => {
       <a class="btn" href="/low-stock.html" target="_blank">🖨 พิมพ์รายการต่ำกว่าขั้นต่ำ</a>
       ${isAdmin() ? '<a class="btn" href="/api/export/stock.xlsx">ส่งออก Excel</a>' : ''}</div>
     <div class="tablewrap"><table><thead><tr><th>รหัส</th><th>ชื่อหนังสือ</th><th class="num">คงเหลือ</th><th>หน่วย</th><th class="num">ขั้นต่ำ</th><th class="num">ราคาปก (บาท)</th></tr></thead><tbody id="rows"></tbody></table></div>
-    <p class="mute">คลิกที่รายการเพื่อดูบัตรสต็อก (ประวัติรับ-เบิกของหนังสือเล่มนั้น)</p></div>`;
+    <p class="mute" ${isSales() ? 'hidden' : ''}>คลิกที่รายการเพื่อดูบัตรสต็อก (ประวัติรับ-เบิกของหนังสือเล่มนั้น)</p></div>`;
   const draw = () => {
     const q = $('#q').value.trim().toLowerCase(), onlyLow = $('#onlyLow').checked;
     $('#rows').innerHTML = books
       .filter((b) => (!q || (b.code + ' ' + b.name).toLowerCase().includes(q)) && (!onlyLow || isLow(b)))
-      .map((b) => `<tr class="click ${b.stock <= 0 ? 'zero' : isLow(b) ? 'low' : ''}" data-id="${b.id}">
+      .map((b) => `<tr class="${isSales() ? '' : 'click'} ${b.stock <= 0 ? 'zero' : isLow(b) ? 'low' : ''}" data-id="${b.id}">
         <td>${esc(b.code)}</td><td>${esc(b.name)}</td><td class="num"><b>${num(b.stock)}</b></td><td>${esc(b.unit)}</td><td class="num">${num(b.min_qty)}</td>
         <td class="num">${baht(b.price)}</td></tr>`).join('')
       || '<tr><td colspan="6" class="mute">ไม่พบรายการ</td></tr>';
   };
   $('#q').oninput = $('#onlyLow').onchange = draw;
-  $('#rows').onclick = (e) => { const tr = e.target.closest('tr[data-id]'); if (tr) showCard(tr.dataset.id); };
+  $('#rows').onclick = (e) => { const tr = e.target.closest('tr[data-id]'); if (tr && !isSales()) showCard(tr.dataset.id); };
   if (low) $('#showLow').onclick = () => { $('#onlyLow').checked = true; draw(); $('#rows').scrollIntoView({ behavior: 'smooth' }); };
   draw();
 };
@@ -335,10 +338,10 @@ views.books = async () => {
 // ---------- ผู้ใช้งาน (ผู้ดูแล) ----------
 views.users = async () => {
   const users = await api('/api/users');
-  const roles = [['staff', 'เจ้าหน้าที่ (บันทึกรับ-เบิก ดูรายงาน)'], ['admin', 'ผู้ดูแล (จัดการหนังสือ ผู้ใช้ ยกเลิกเอกสาร)']];
+  const roles = [['staff', 'เจ้าหน้าที่ (บันทึกรับ-เบิก ดูรายงาน)'], ['sales', 'ฝ่ายขาย (ดูรายการหนังสือและยอดคงเหลือเท่านั้น)'], ['admin', 'ผู้ดูแล (จัดการหนังสือ ผู้ใช้ ยกเลิกเอกสาร)']];
   main.innerHTML = `<h2>${state.requireLogin ? 'ผู้ใช้งาน' : 'ตั้งค่า'}</h2><div class="card" ${state.requireLogin ? '' : 'hidden'}><div class="bar"><button class="btn" id="add">+ เพิ่มผู้ใช้</button></div>
     <div class="tablewrap"><table><thead><tr><th>ชื่อผู้ใช้</th><th>ชื่อ-สกุล</th><th>สิทธิ์</th><th>สถานะ</th><th></th></tr></thead><tbody id="rows">
-    ${users.map((u) => `<tr><td>${esc(u.username)}</td><td>${esc(u.name)}</td><td>${u.role === 'admin' ? 'ผู้ดูแล' : 'เจ้าหน้าที่'}</td>
+    ${users.map((u) => `<tr><td>${esc(u.username)}</td><td>${esc(u.name)}</td><td>${ROLE_LABEL[u.role] ?? u.role}</td>
       <td>${u.active ? '<span class="tag in">ใช้งาน</span>' : '<span class="tag off">ปิด</span>'}</td>
       <td><button class="btn ghost sm" data-id="${u.id}">แก้ไข</button></td></tr>`).join('')}</tbody></table></div></div>
     <div class="card"><div class="bar"><label class="grow">ชื่อหน่วยงาน (แสดงบนหัวใบเบิกและรายงาน)<input id="org" value="${esc(state.orgName)}"></label>
