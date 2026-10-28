@@ -75,6 +75,12 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_items_doc ON doc_items(doc_id);
   CREATE INDEX IF NOT EXISTS idx_docs_date ON docs(date);
   CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  -- ประวัติการแก้ไขเอกสาร: before = ข้อมูลก่อนแก้ (JSON) เพื่อตรวจสอบย้อนหลัง
+  CREATE TABLE IF NOT EXISTS doc_edits (
+    id INTEGER PRIMARY KEY, doc_id INTEGER NOT NULL REFERENCES docs(id), edited_by INTEGER NOT NULL REFERENCES users(id),
+    edited_at TEXT NOT NULL, reason TEXT NOT NULL, before TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_edits_doc ON doc_edits(doc_id);
   -- รูปหนังสือ (ย่อเป็น JPEG ที่เบราว์เซอร์ก่อนอัปโหลด) แยกตารางไว้ ไม่ให้รายการหนังสือโหลดช้า
   CREATE TABLE IF NOT EXISTS book_images (
     book_id INTEGER PRIMARY KEY REFERENCES books(id), mime TEXT NOT NULL, data BLOB NOT NULL, updated_at TEXT NOT NULL
@@ -110,6 +116,9 @@ async function migrate() {
       CREATE INDEX IF NOT EXISTS idx_docs_date ON docs(date);
       COMMIT; PRAGMA foreign_keys = ON;`);
   }
+  // เหตุผลที่ยกเลิกเอกสาร
+  if (!(await db.all(`SELECT name FROM pragma_table_info('docs')`)).some((c) => c.name === 'cancel_reason'))
+    await db.run(`ALTER TABLE docs ADD COLUMN cancel_reason TEXT NOT NULL DEFAULT ''`);
   // ราคาปก (แสดงอย่างเดียว ไม่ใช้คำนวณยอดรับ-เบิก) + ใส่ราคาจากไฟล์ครั้งเดียว
   const bookCols = (await db.all(`SELECT name FROM pragma_table_info('books')`)).map((c) => c.name);
   if (!bookCols.includes('price')) await db.run('ALTER TABLE books ADD COLUMN price REAL NOT NULL DEFAULT 0');
@@ -358,6 +367,16 @@ app.get('/api/books/:id/card', staff, async (req, res) => {
 });
 
 // ---------- documents (ใบรับ / ใบเบิก / ใบตัดชำรุด) ----------
+// รายการหนังสือในเอกสาร → Map(book_id → qty) รวมรายการซ้ำของหนังสือเล่มเดียวกัน
+function parseItems(list) {
+  if (!Array.isArray(list) || !list.length) fail(400, 'ยังไม่มีรายการหนังสือ');
+  const items = new Map();
+  for (const it of list) {
+    if (!posInt(it.book_id) || !posInt(it.qty)) fail(400, 'จำนวนต้องเป็นจำนวนเต็มมากกว่า 0');
+    items.set(it.book_id, (items.get(it.book_id) || 0) + it.qty);
+  }
+  return items;
+}
 app.post('/api/docs', staff, async (req, res) => {
   const type = DOC_PREFIX[req.body.type] ? req.body.type : fail(400, 'ประเภทเอกสารไม่ถูกต้อง');
   const date = isDate(req.body.date) ? req.body.date : fail(400, 'วันที่ไม่ถูกต้อง');
@@ -365,12 +384,7 @@ app.post('/api/docs', staff, async (req, res) => {
   const party = type === 'IN' ? str(req.body.party, 120) : req.user.name, po_no = str(req.body.po_no, 120), dept = str(req.body.dept, 120), note = str(req.body.note, 300);
   const reason = type === 'DMG' ? str(req.body.reason, 40) : '';
   if (type === 'DMG' && !DMG_REASONS.includes(reason)) fail(400, 'เลือกสาเหตุ');
-  if (!Array.isArray(req.body.items) || !req.body.items.length) fail(400, 'ยังไม่มีรายการหนังสือ');
-  const items = new Map(); // รวมรายการซ้ำของหนังสือเล่มเดียวกัน
-  for (const it of req.body.items) {
-    if (!posInt(it.book_id) || !posInt(it.qty)) fail(400, 'จำนวนต้องเป็นจำนวนเต็มมากกว่า 0');
-    items.set(it.book_id, (items.get(it.book_id) || 0) + it.qty);
-  }
+  const items = parseItems(req.body.items);
   const doc = await tx(async (q) => {
     for (const [bookId, qty] of items) {
       const b = await q.get('SELECT * FROM books WHERE id = ?', bookId);
@@ -404,7 +418,8 @@ function docFilter(q) {
 
 app.get('/api/docs', staff, async (req, res) => {
   const f = docFilter(req.query);
-  res.json(await db.all(`SELECT d.id, d.doc_no, d.type, d.date, d.party, d.po_no, d.dept, d.reason, d.note, d.cancelled, u.name created_by,
+  res.json(await db.all(`SELECT d.id, d.doc_no, d.type, d.date, d.party, d.po_no, d.dept, d.reason, d.note, d.cancelled, d.cancel_reason, u.name created_by,
+                           (SELECT COUNT(*) FROM doc_edits e WHERE e.doc_id = d.id) edit_count,
                            (SELECT COUNT(*) FROM doc_items i WHERE i.doc_id = d.id) item_count,
                            (SELECT SUM(qty) FROM doc_items i WHERE i.doc_id = d.id) total_qty
                          FROM docs d JOIN users u ON u.id = d.created_by ${f.sql}
@@ -416,13 +431,51 @@ app.get('/api/docs/:id', staff, async (req, res) => {
                             JOIN users u ON u.id = d.created_by LEFT JOIN users c ON c.id = d.cancelled_by
                             WHERE d.id = ?`, Number(req.params.id));
   if (!doc) fail(404, 'ไม่พบเอกสาร');
-  doc.items = await db.all(`SELECT b.code, b.name, b.unit, b.price, i.qty FROM doc_items i JOIN books b ON b.id = i.book_id
+  doc.items = await db.all(`SELECT i.book_id, b.code, b.name, b.unit, b.price, i.qty FROM doc_items i JOIN books b ON b.id = i.book_id
                             WHERE i.doc_id = ? ORDER BY i.id`, doc.id);
+  doc.edits = await db.all(`SELECT e.edited_at, e.reason, u.name edited_by_name FROM doc_edits e JOIN users u ON u.id = e.edited_by
+                            WHERE e.doc_id = ? ORDER BY e.id`, doc.id);
   res.json({ doc, orgName: await setting('org_name') });
 });
 
-// ยกเลิกเอกสาร (ไม่ลบทิ้ง เพื่อให้ตรวจสอบย้อนหลังได้)
+// แก้ไขเอกสาร (ผู้ดูแล): เลขที่และประเภทเอกสารคงเดิม, ผู้เบิก/ผู้รายงาน/ผู้รับเข้าคงเดิม, เก็บข้อมูลก่อนแก้ไว้ใน doc_edits
+app.put('/api/docs/:id', admin, async (req, res) => {
+  const editReason = str(req.body.edit_reason, 300) || fail(400, 'กรอกเหตุผลที่แก้ไข');
+  const date = isDate(req.body.date) ? req.body.date : fail(400, 'วันที่ไม่ถูกต้อง');
+  const items = parseItems(req.body.items);
+  await tx(async (q) => {
+    const doc = await q.get('SELECT * FROM docs WHERE id = ?', Number(req.params.id));
+    if (!doc) fail(404, 'ไม่พบเอกสาร');
+    if (doc.cancelled) fail(400, 'เอกสารที่ยกเลิกแล้วแก้ไขไม่ได้');
+    if (Number(date.slice(0, 4)) + 543 !== doc.year) fail(400, `เปลี่ยนวันที่ข้ามปีไม่ได้ (เลขที่เอกสารนี้เป็นของปี ${doc.year})`);
+    const party = doc.type === 'IN' ? str(req.body.party, 120) : doc.party;
+    const reason = doc.type === 'DMG' ? str(req.body.reason, 40) : '';
+    if (doc.type === 'DMG' && !DMG_REASONS.includes(reason)) fail(400, 'เลือกสาเหตุ');
+    const old = await q.all('SELECT book_id, qty FROM doc_items WHERE doc_id = ? ORDER BY id', doc.id);
+    // ยอดที่เปลี่ยนไปของแต่ละเล่ม (รับ = +, เบิก/ชำรุด = −) ต้องไม่ทำให้คงเหลือติดลบ
+    const sign = doc.type === 'IN' ? 1 : -1, delta = new Map();
+    for (const it of old) delta.set(it.book_id, (delta.get(it.book_id) || 0) - sign * it.qty);
+    for (const [bookId, qty] of items) delta.set(bookId, (delta.get(bookId) || 0) + sign * qty);
+    for (const [bookId, d] of delta) {
+      const b = await q.get('SELECT * FROM books WHERE id = ?', bookId);
+      if (!b) fail(400, 'ไม่พบหนังสือในระบบ');
+      const stock = await stockOf(q, bookId);
+      if (stock + d < 0) fail(400, `แก้ไขไม่ได้: "${b.name}" ยอดคงเหลือจะติดลบ (คงเหลือตอนนี้ ${stock} ${b.unit})`);
+    }
+    const before = { date: doc.date, party: doc.party, po_no: doc.po_no, dept: doc.dept, reason: doc.reason, note: doc.note, items: old };
+    await q.run('INSERT INTO doc_edits (doc_id, edited_by, edited_at, reason, before) VALUES (?, ?, ?, ?, ?)',
+      doc.id, req.user.id, now(), editReason, JSON.stringify(before));
+    await q.run('UPDATE docs SET date = ?, party = ?, po_no = ?, dept = ?, reason = ?, note = ? WHERE id = ?',
+      date, party, str(req.body.po_no, 120), str(req.body.dept, 120), reason, str(req.body.note, 300), doc.id);
+    await q.run('DELETE FROM doc_items WHERE doc_id = ?', doc.id);
+    for (const [bookId, qty] of items) await q.run('INSERT INTO doc_items (doc_id, book_id, qty) VALUES (?, ?, ?)', doc.id, bookId, qty);
+  });
+  res.json({ ok: true });
+});
+
+// ยกเลิกเอกสาร (ไม่ลบทิ้ง เพื่อให้ตรวจสอบย้อนหลังได้) ต้องระบุเหตุผล
 app.post('/api/docs/:id/cancel', admin, async (req, res) => {
+  const reason = str(req.body.reason, 300) || fail(400, 'กรอกเหตุผลที่ยกเลิกเอกสาร');
   await tx(async (q) => {
     const doc = await q.get('SELECT * FROM docs WHERE id = ?', Number(req.params.id));
     if (!doc) fail(404, 'ไม่พบเอกสาร');
@@ -433,7 +486,7 @@ app.post('/api/docs/:id/cancel', admin, async (req, res) => {
       for (const it of items)
         if ((await stockOf(q, it.book_id)) - it.qty < 0) fail(400, `ยกเลิกไม่ได้: "${it.name}" ถูกเบิกออกไปแล้ว ยอดจะติดลบ`);
     }
-    await q.run('UPDATE docs SET cancelled = 1, cancelled_by = ?, cancelled_at = ? WHERE id = ?', req.user.id, now(), doc.id);
+    await q.run('UPDATE docs SET cancelled = 1, cancelled_by = ?, cancelled_at = ?, cancel_reason = ? WHERE id = ?', req.user.id, now(), reason, doc.id);
   });
   res.json({ ok: true });
 });

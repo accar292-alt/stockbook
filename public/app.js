@@ -74,7 +74,7 @@ async function loadBooks() {
 }
 
 // กล่องฟอร์มแบบป๊อปอัป: fields = [{name, label, type, value, options, required}]
-function formDialog(title, fields, onSubmit) {
+function formDialog(title, fields, onSubmit, opts = {}) {
   dlg.className = '';
   dlg.innerHTML = `<form><h3>${esc(title)}</h3>${fields.map((f) =>
     f.type === 'checkbox'
@@ -83,7 +83,7 @@ function formDialog(title, fields, onSubmit) {
         ? `<label>${esc(f.label)}<select name="${f.name}">${f.options.map(([v, t]) => `<option value="${v}" ${v === f.value ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`
         : `<label>${esc(f.label)}<input name="${f.name}" type="${f.type || 'text'}" value="${esc(f.value ?? '')}" ${f.required === false ? '' : 'required'} ${f.type === 'number' ? `min="0" step="${f.step ?? 1}"` : ''} autocomplete="${f.type === 'password' ? 'new-password' : 'off'}"></label>`).join('')}
     <div class="err"></div>
-    <div class="actions"><button type="button" class="btn ghost" data-close>ยกเลิก</button><button class="btn">บันทึก</button></div></form>`;
+    <div class="actions"><button type="button" class="btn ghost" data-close>${opts.close ?? 'ยกเลิก'}</button><button class="btn ${opts.okClass ?? ''}">${opts.ok ?? 'บันทึก'}</button></div></form>`;
   $('[data-close]', dlg).onclick = () => dlg.close();
   $('form', dlg).onsubmit = async (e) => {
     e.preventDefault();
@@ -192,32 +192,40 @@ async function showCard(bookId) {
 }
 
 // ---------- บันทึกรับเข้า / เบิกออก ----------
-function docForm(type, saved) {
-  const T = TYPES[type], isOut = type !== 'IN', items = [];
+// editing = เอกสารเดิม (จาก /api/docs/:id) เมื่อผู้ดูแลกดแก้ไข
+function docForm(type, saved, editing) {
+  const T = TYPES[type], isOut = type !== 'IN', items = [], E = editing;
+  // ตอนแก้ไขใบเบิก/ใบตัดชำรุด จำนวนเดิมในใบนี้ถือเป็นของที่เบิกได้ด้วย
+  const orig = new Map((E?.items ?? []).map((it) => [it.book_id, it.qty]));
+  const avail = (b) => (isOut && orig.has(b.id) ? { ...b, stock: b.stock + orig.get(b.id) } : b);
   const showPrice = true; // ทุกหน้าบันทึก (รับเข้า/เบิกจ่าย/ตัดชำรุด) แสดงราคาปกให้ดูอย่างเดียว ไม่นำไปคำนวณยอดรวม // isOut = ยอดลดลง (เบิกจ่าย / ตัดชำรุด); items: {book, qty}
   // ชื่อผู้รับ / ผู้เบิก / ผู้รายงาน = ผู้ที่ login อยู่ (แก้ไม่ได้ เซิร์ฟเวอร์ใช้ชื่อจากบัญชีเสมอ)
-  const me = (label) => `<label>${label}<input class="locked" value="${esc(state.user.name)}" readonly tabindex="-1"></label>`;
+  // ตอนแก้ไข ชื่อคงเดิมตามเอกสาร
+  const who = E ? (type === 'IN' ? E.created_by_name : E.party) : state.user.name;
+  const me = (label) => `<label>${label}<input class="locked" value="${esc(who)}" readonly tabindex="-1"></label>`;
   const fields = {
     IN: me('ผู้รับเข้า') + '<label>รับจากใบรับงานเลขที่<input id="party"></label>',
     OUT: me('ผู้เบิก') + '<label>ใบสั่งซื้อเลขที่<input id="po_no"></label><label>ชื่อหน่วยงาน<input id="dept"></label>',
     DMG: `<label>สาเหตุ *<select id="reason"><option value="">— เลือกสาเหตุ —</option>${DMG_REASONS.map((r) => `<option>${r}</option>`).join('')}</select></label>` + me('ผู้รายงาน'),
   }[type];
   main.innerHTML = `<div class="doc-head ${T.cls}"><span class="sign">${T.sign}</span>
-      <div><h2>${T.title}</h2><p>${T.desc}</p></div></div>
+      <div><h2>${E ? `แก้ไข${T.slip} ${esc(E.doc_no)}` : T.title}</h2><p>${E ? 'ผู้ดูแลแก้ไขเอกสาร — ยอดสต็อกจะปรับตามจำนวนใหม่ทันทีที่บันทึก' : T.desc}</p></div></div>
     ${saved ? `<div class="card saved">✔ บันทึกเอกสาร <b>${esc(saved.doc_no)}</b> แล้ว <a class="btn" href="/slip.html?id=${saved.id}" target="_blank">ดู/พิมพ์${T.slip}</a></div>` : ''}<div class="card doc-card ${T.cls}">
     <div class="grid">
       <label>วันที่<input type="date" id="date" value="${today()}"></label>
       ${fields}
       <label>หมายเหตุ${type === 'DMG' ? ' (รายละเอียดความเสียหาย)' : ''}<input id="note"></label>
+      ${E ? '<label>เหตุผลที่แก้ไข *<input id="edit_reason" placeholder="เช่น ใส่จำนวนผิด, เลือกหนังสือผิดเล่ม"></label>' : ''}
     </div>
     <div class="picker"><label>เพิ่มหนังสือ (พิมพ์รหัสหรือชื่อ แล้วกด Enter หรือคลิกเลือก)<input id="pick" autocomplete="off" placeholder="ค้นหาหนังสือ..."></label><div class="sugg" id="sugg" hidden></div></div>
     <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>#</th><th>รหัส</th><th>ชื่อหนังสือ</th><th class="num">คงเหลือ</th>${showPrice ? '<th class="num">ราคาปก (บาท)</th>' : ''}<th class="num">${T.qty}</th><th></th></tr></thead><tbody id="items"></tbody>
       <tfoot><tr><th colspan="${showPrice ? 5 : 4}" class="num">รวมจำนวน</th><th class="num" id="total">0</th><th></th></tr></tfoot></table></div>
     <div class="err" id="err"></div>
-    <div class="actions">
+    <div class="actions">${E ? `<button class="btn big ghost" id="back">ยกเลิกการแก้ไข</button>
+      <button class="btn big ${T.cls}" id="save">บันทึกการแก้ไข</button>` : `
       ${T.print ? `<span class="mute" id="printHint">${saved ? `พิมพ์ใบ ${esc(saved.doc_no)} ที่เพิ่งบันทึก` : 'บันทึกก่อน จึงจะพิมพ์ได้'}</span>
         <button class="btn big ghost" id="print" ${saved ? '' : 'disabled'}>🖨 พิมพ์${T.slip}</button>` : ''}
-      <button class="btn big ${T.cls}" id="save">${T.save}</button></div></div>`;
+      <button class="btn big ${T.cls}" id="save">${T.save}</button>`}</div></div>`;
   const pick = $('#pick'), sugg = $('#sugg');
   let matches = [];
   const total = () => ($('#total').textContent = num(items.reduce((s, it) => s + (Number(it.qty) || 0), 0)));
@@ -230,6 +238,7 @@ function docForm(type, saved) {
     total();
   };
   const add = (book) => {
+    book = avail(book);
     if (items.some((it) => it.book.id === book.id)) toast('มีหนังสือเล่มนี้ในรายการแล้ว', true);
     else if (isOut && book.stock <= 0) toast('หนังสือเล่มนี้ไม่มีของคงเหลือ', true);
     else { items.push({ book, qty: 1 }); draw(); const inputs = main.querySelectorAll('#items input'); inputs[inputs.length - 1].select(); }
@@ -254,17 +263,29 @@ function docForm(type, saved) {
     $('#err').textContent = '';
     btn.disabled = true;
     try {
-      const doc = await api('/api/docs', 'POST', {
+      const body = {
         type, date: $('#date').value, party: $('#party')?.value ?? '', po_no: $('#po_no')?.value ?? '', dept: $('#dept')?.value ?? '', reason: $('#reason')?.value ?? '', note: $('#note').value,
-        items: items.map((it) => ({ book_id: it.book.id, qty: it.qty })) });
+        items: items.map((it) => ({ book_id: it.book.id, qty: it.qty })) };
+      if (E) {
+        await api(`/api/docs/${E.id}`, 'PUT', { ...body, edit_reason: $('#edit_reason').value });
+        toast(`แก้ไขเอกสาร ${E.doc_no} แล้ว`);
+        return go('docs');
+      }
+      const doc = await api('/api/docs', 'POST', body);
       toast(`บันทึกเอกสาร ${doc.doc_no} แล้ว`);
       await loadBooks();
       docForm(type, doc);
     } catch (err) { $('#err').textContent = err.message; btn.disabled = false; }
   };
   if (T.print && saved) $('#print').onclick = () => window.open(`/slip.html?id=${saved.id}&print=1`);
+  if (E) {
+    $('#back').onclick = () => go('docs');
+    $('#date').value = E.date;
+    for (const k of ['party', 'po_no', 'dept', 'reason', 'note']) if ($('#' + k)) $('#' + k).value = E[k] ?? '';
+    for (const it of E.items) { const b = state.books.find((x) => x.id === it.book_id); if (b) items.push({ book: avail(b), qty: it.qty }); }
+  }
   draw();
-  ({ IN: $('#party'), OUT: $('#po_no'), DMG: $('#reason') })[type].focus();
+  (E ? $('#edit_reason') : ({ IN: $('#party'), OUT: $('#po_no'), DMG: $('#reason') })[type]).focus();
 }
 views.in = async () => { await loadBooks(); docForm('IN'); };
 views.out = async () => { await loadBooks(); docForm('OUT'); };
@@ -282,18 +303,30 @@ views.docs = async () => {
     const p = new URLSearchParams({ type: $('#type').value, from: $('#from').value, to: $('#to').value, q: $('#q').value });
     const docs = await api('/api/docs?' + p);
     $('#rows').innerHTML = docs.map((d) => `<tr class="${d.cancelled ? 'void' : ''}"><td>${fmtDate(d.date)}</td><td>${esc(d.doc_no)}</td>
-      <td>${d.cancelled ? '<span class="tag bad">ยกเลิก</span>' : typeTag(d.type)}</td><td>${esc(d.party)}</td><td>${esc(d.po_no)}</td><td>${esc(d.dept || d.reason)}</td>
+      <td>${d.cancelled ? `<span class="tag bad">ยกเลิก</span>${d.cancel_reason ? `<br><span class="void-reason">เหตุผล: ${esc(d.cancel_reason)}</span>` : ''}` : typeTag(d.type)}
+        ${d.edit_count ? `<span class="tag off" title="แก้ไขแล้ว ${d.edit_count} ครั้ง ดูรายละเอียดท้ายใบเอกสาร">แก้ไขแล้ว</span>` : ''}</td><td>${esc(d.party)}</td><td>${esc(d.po_no)}</td><td>${esc(d.dept || d.reason)}</td>
       <td class="num">${num(d.item_count)}</td><td class="num">${num(d.total_qty)}</td><td>${esc(d.created_by)}</td>
       <td style="white-space:nowrap"><a class="btn" style="padding:4px 9px;font-size:.85em" href="/slip.html?id=${d.id}" target="_blank">ดู/พิมพ์</a>
-      ${isAdmin() && !d.cancelled ? `<button class="btn danger sm" data-cancel="${d.id}" data-no="${esc(d.doc_no)}">ยกเลิก</button>` : ''}</td></tr>`).join('')
+      ${isAdmin() && !d.cancelled ? `<button class="btn ghost sm" data-edit="${d.id}">แก้ไข</button>
+        <button class="btn danger sm" data-cancel="${d.id}" data-no="${esc(d.doc_no)}">ยกเลิก</button>` : ''}</td></tr>`).join('')
       || '<tr><td colspan="10" class="mute">ไม่พบเอกสาร</td></tr>';
   };
   $('#find').onclick = () => load().catch((e) => toast(e.message, true));
   $('#q').onkeydown = (e) => e.key === 'Enter' && $('#find').click();
   $('#rows').onclick = async (e) => {
-    const id = e.target.dataset.cancel;
-    if (!id || !confirm(`ยืนยันยกเลิกเอกสาร ${e.target.dataset.no} ?\nยอดสต็อกจะถูกปรับกลับ และไม่สามารถกู้คืนเอกสารได้`)) return;
-    try { await api(`/api/docs/${id}/cancel`, 'POST'); toast('ยกเลิกเอกสารแล้ว'); await load(); } catch (err) { toast(err.message, true); }
+    const { edit: editId, cancel: id, no } = e.target.dataset;
+    if (editId) {
+      try {
+        const [{ doc }] = await Promise.all([api(`/api/docs/${editId}`), loadBooks()]);
+        docForm(doc.type, null, doc); window.scrollTo(0, 0);
+      } catch (err) { toast(err.message, true); }
+      return;
+    }
+    if (!id) return;
+    formDialog(`ยกเลิกเอกสาร ${no}`, [
+      { name: 'reason', label: 'เหตุผลที่ยกเลิก * (เช่น บันทึกผิด, บันทึกซ้ำ, ลูกค้ายกเลิกคำสั่งซื้อ) — ยอดสต็อกจะถูกปรับกลับ และกู้คืนเอกสารไม่ได้' }],
+      async (v) => { await api(`/api/docs/${id}/cancel`, 'POST', v); toast(`ยกเลิกเอกสาร ${no} แล้ว`); await load(); },
+      { ok: 'ยืนยันยกเลิกเอกสาร', okClass: 'danger', close: 'ปิด' });
   };
   await load();
 };

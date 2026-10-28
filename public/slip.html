@@ -34,6 +34,9 @@
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmtDate = (d) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${Number(d.slice(0, 4)) + 543}`;
 const num = (n) => Number(n).toLocaleString('th-TH');
+// เวลาบันทึก/แก้ไข/ยกเลิก (ISO) → 28/10/2569 14:05
+const fmtTime = (iso) => { if (!iso) return ''; const t = new Date(iso), p = (n) => String(n).padStart(2, '0');
+  return `${p(t.getDate())}/${p(t.getMonth() + 1)}/${t.getFullYear() + 543} ${p(t.getHours())}:${p(t.getMinutes())}`; };
 // ราคาปก: แสดงอย่างเดียว ไม่นำไปคำนวณมูลค่า
 const baht = (n) => { const v = Number(n || 0); return v.toLocaleString('th-TH', { minimumFractionDigits: Number.isInteger(v) ? 0 : 2, maximumFractionDigits: 2 }); };
 (async () => {
@@ -55,12 +58,14 @@ const baht = (n) => { const v = Number(n || 0); return v.toLocaleString('th-TH',
       <div>${out ? `<b>ชื่อหน่วยงาน:</b> ${esc(d.dept) || '-'}` : dmg ? `<b>สาเหตุ:</b> ${esc(d.reason) || '-'}` : `<b>รับจากใบรับงานเลขที่:</b> ${esc(d.party) || '-'}`}</div><div><b>วันที่:</b> ${fmtDate(d.date)}</div>
       ${out ? `<div style="grid-column:1/3"><b>ใบสั่งซื้อเลขที่:</b> ${esc(d.po_no) || '-'}</div>` : ''}
       <div style="grid-column:1/3"><b>หมายเหตุ:</b> ${esc(d.note) || '-'}</div>
+      ${d.cancelled ? `<div style="grid-column:1/3;color:#c00"><b>ยกเลิกเอกสาร:</b> ${esc(d.cancel_reason) || '-'} (โดย ${esc(d.cancelled_by_name)} ${fmtTime(d.cancelled_at)})</div>` : ''}
     </div>
     <table><thead><tr><th style="width:40px">ลำดับ</th><th style="width:90px">รหัส</th><th>รายการ</th><th style="width:80px">ราคาปก<br>(บาท)</th><th style="width:80px">จำนวน</th><th style="width:60px">หน่วย</th></tr></thead>
     <tbody>${d.items.map((it, i) => `<tr><td class="c">${i + 1}</td><td>${esc(it.code)}</td><td>${esc(it.name)}</td><td class="r">${baht(it.price)}</td><td class="r">${num(it.qty)}</td><td class="c">${esc(it.unit)}</td></tr>`).join('')}</tbody>
     <tfoot><tr><th colspan="4" class="r">รวม ${d.items.length} รายการ</th><th class="r">${num(d.items.reduce((s, it) => s + it.qty, 0))}</th><th></th></tr></tfoot></table>
     <div class="signs">${signs.map(([s, name]) => `<div>ลงชื่อ ..............................................<br>( ${name ? esc(name) : '..............................................'} )<br>${s}<br>วันที่ ......... / ......... / .........</div>`).join('')}</div>
-    <div class="foot">บันทึกโดย ${esc(d.created_by_name)}${d.cancelled ? ` · ยกเลิกโดย ${esc(d.cancelled_by_name)}` : ''}</div>`;
+    <div class="foot">บันทึกโดย ${esc(d.created_by_name)} ${fmtTime(d.created_at)}${d.cancelled ? ` · ยกเลิกโดย ${esc(d.cancelled_by_name)}` : ''}
+      ${d.edits.map((e, i) => `<br>แก้ไขครั้งที่ ${i + 1} โดย ${esc(e.edited_by_name)} ${fmtTime(e.edited_at)} — เหตุผล: ${esc(e.reason)}`).join('')}</div>`;
   if (new URLSearchParams(location.search).get('print') === '1') { await document.fonts.ready; window.print(); }
 })();
 </script>

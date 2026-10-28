@@ -119,3 +119,5 @@ img.thumb { cursor: zoom-in; }
 .withimg { display: flex; align-items: center; gap: 10px; }
 td:has(> .thumb) { padding-top: 4px; padding-bottom: 4px; }
 @media print { .thumb { display: none !important; } }
+/* เหตุผลที่ยกเลิก: ไม่ขีดฆ่าตามแถว */
+.void-reason { display: inline-block; text-decoration: none; color: var(--bad); font-size: .85em; }
