@@ -75,6 +75,10 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_items_doc ON doc_items(doc_id);
   CREATE INDEX IF NOT EXISTS idx_docs_date ON docs(date);
   CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  -- รูปหนังสือ (ย่อเป็น JPEG ที่เบราว์เซอร์ก่อนอัปโหลด) แยกตารางไว้ ไม่ให้รายการหนังสือโหลดช้า
+  CREATE TABLE IF NOT EXISTS book_images (
+    book_id INTEGER PRIMARY KEY REFERENCES books(id), mime TEXT NOT NULL, data BLOB NOT NULL, updated_at TEXT NOT NULL
+  );
   INSERT OR IGNORE INTO settings VALUES ('org_name', 'บริษัท ยงสวัสดิ์ อินเตอร์กรุ๊ป จำกัด (สำนักงานใหญ่)');
   -- ครั้งเดียว: ตั้งยอดขั้นต่ำเริ่มต้น 500 ให้หนังสือที่ยังไม่ได้กำหนด (เตือนเมื่อคงเหลือต่ำกว่านี้)
   UPDATE books SET min_qty = 500 WHERE min_qty = 0 AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'min_qty_500');
@@ -284,7 +288,9 @@ app.put('/api/settings', admin, async (req, res) => {
 });
 
 // ---------- books ----------
-const listBooks = () => db.all(`SELECT b.*, ${STOCK_SQL} AS stock FROM books b ORDER BY b.code`);
+// img = เวลาที่อัปโหลดรูปล่าสุด (ต่อท้าย URL รูป ให้เบราว์เซอร์จำรูปไว้ และโหลดใหม่เมื่อเปลี่ยนรูป), null = ยังไม่มีรูป
+const listBooks = () => db.all(`SELECT b.*, ${STOCK_SQL} AS stock,
+  (SELECT updated_at FROM book_images WHERE book_id = b.id) AS img FROM books b ORDER BY b.code`);
 // ฝ่ายขายไม่เห็นยอดขั้นต่ำ (ตัดออกจากข้อมูลที่ส่งไปเลย ไม่ใช่แค่ซ่อนบนจอ)
 app.get('/api/books', auth, async (req, res) => {
   const books = await listBooks();
@@ -312,6 +318,30 @@ app.put('/api/books/:id', admin, async (req, res) => {
   const r = await db.run('UPDATE books SET code = ?, name = ?, unit = ?, min_qty = ?, active = ?, price = ? WHERE id = ?',
     b.code, b.name, b.unit, b.min_qty, b.active, b.price, id);
   if (!r.changes) fail(404, 'ไม่พบหนังสือ');
+  res.json({ ok: true });
+});
+
+// ---------- รูปหนังสือ ----------
+const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+app.get('/api/books/:id/image', auth, async (req, res) => {
+  const img = await db.get('SELECT mime, data FROM book_images WHERE book_id = ?', Number(req.params.id));
+  if (!img) fail(404, 'ไม่มีรูป');
+  res.set('Cache-Control', 'private, max-age=31536000, immutable').type(img.mime).send(Buffer.from(img.data));
+});
+// body: { image: 'data:image/jpeg;base64,...' }
+app.put('/api/books/:id/image', admin, async (req, res) => {
+  const id = Number(req.params.id);
+  const m = /^data:([\w/+.-]+);base64,([A-Za-z0-9+/=]+)$/.exec(req.body.image || '');
+  if (!m || !IMAGE_TYPES.includes(m[1])) fail(400, 'ไฟล์รูปไม่ถูกต้อง (ใช้ JPG, PNG หรือ WEBP)');
+  const data = Buffer.from(m[2], 'base64');
+  if (data.length > 500 * 1024) fail(400, 'รูปใหญ่เกินไป');
+  if (!(await db.get('SELECT 1 FROM books WHERE id = ?', id))) fail(404, 'ไม่พบหนังสือ');
+  await db.run(`INSERT INTO book_images VALUES (?, ?, ?, ?)
+    ON CONFLICT(book_id) DO UPDATE SET mime = excluded.mime, data = excluded.data, updated_at = excluded.updated_at`, id, m[1], data, now());
+  res.json({ ok: true });
+});
+app.delete('/api/books/:id/image', admin, async (req, res) => {
+  await db.run('DELETE FROM book_images WHERE book_id = ?', Number(req.params.id));
   res.json({ ok: true });
 });
 

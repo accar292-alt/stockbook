@@ -33,6 +33,38 @@ function toast(msg, bad) {
   t.textContent = msg; t.className = bad ? 'bad' : ''; t.hidden = false;
   clearTimeout(toast.timer); toast.timer = setTimeout(() => (t.hidden = true), 3500);
 }
+// ---------- รูปหนังสือ ----------
+const imgUrl = (b) => `/api/books/${b.id}/image?v=${encodeURIComponent(b.img)}`;
+// รูปเล็ก: คลิกเพื่อดูรูปใหญ่ (data-zoom) ถ้ายังไม่มีรูปแสดงกรอบว่าง
+const thumb = (b, cls = '') => b.img
+  ? `<img class="thumb ${cls}" src="${imgUrl(b)}" loading="lazy" alt="" data-zoom="${b.id}" title="คลิกเพื่อดูรูปใหญ่">`
+  : `<span class="thumb none ${cls}" title="ยังไม่มีรูป">📖</span>`;
+function showImage(bookId) {
+  const b = state.books.find((x) => x.id == bookId);
+  if (!b?.img) return;
+  dlg.className = 'wide';
+  dlg.innerHTML = `<h3>${esc(b.code)} ${esc(b.name)}</h3><div style="text-align:center"><img src="${imgUrl(b)}" alt="" style="max-width:100%;max-height:70vh"></div>
+    <div class="actions"><button class="btn ghost" data-close>ปิด</button></div>`;
+  $('[data-close]', dlg).onclick = () => dlg.close();
+  dlg.showModal();
+}
+// ย่อรูปที่เบราว์เซอร์ (ด้านยาวสุด 600px, JPEG) ก่อนอัปโหลด — รูปจากมือถือหลาย MB จะเหลือราว 50-100KB
+async function shrinkImage(file) {
+  let bmp;
+  try { bmp = await createImageBitmap(file); } catch { throw new Error(`เปิดไฟล์ ${file.name} ไม่ได้ (ใช้ JPG หรือ PNG)`); }
+  const scale = Math.min(1, 600 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); // PNG พื้นใส → พื้นขาว
+  g.drawImage(bmp, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.82);
+}
+const pickFiles = (multiple) => new Promise((resolve) => {
+  const inp = Object.assign(document.createElement('input'), { type: 'file', accept: 'image/*', multiple });
+  inp.onchange = () => resolve([...inp.files]);
+  inp.click();
+});
 async function loadBooks() {
   state.books = await api('/api/books');
   // ป้ายแจ้งเตือนบนเมนู: จำนวนหนังสือที่ยอดต่ำกว่าขั้นต่ำ
@@ -126,19 +158,22 @@ views.stock = async () => {
       <label class="check" ${isSales() ? 'hidden' : ''}><input type="checkbox" id="onlyLow"> เฉพาะที่ต่ำกว่าขั้นต่ำ</label>
       ${isSales() ? '' : '<a class="btn" href="/low-stock.html" target="_blank">🖨 พิมพ์รายการต่ำกว่าขั้นต่ำ</a>'}
       ${isAdmin() ? '<a class="btn" href="/api/export/stock.xlsx">ส่งออก Excel</a>' : ''}</div>
-    <div class="tablewrap"><table><thead><tr><th>รหัส</th><th>ชื่อหนังสือ</th><th class="num">คงเหลือ</th><th>หน่วย</th>${isSales() ? '' : '<th class="num">ขั้นต่ำ</th>'}<th class="num">ราคาปก (บาท)</th></tr></thead><tbody id="rows"></tbody></table></div>
+    <div class="tablewrap"><table><thead><tr><th>รูป</th><th>รหัส</th><th>ชื่อหนังสือ</th><th class="num">คงเหลือ</th><th>หน่วย</th>${isSales() ? '' : '<th class="num">ขั้นต่ำ</th>'}<th class="num">ราคาปก (บาท)</th></tr></thead><tbody id="rows"></tbody></table></div>
     <p class="mute" ${isSales() ? 'hidden' : ''}>คลิกที่รายการเพื่อดูบัตรสต็อก (ประวัติรับ-เบิกของหนังสือเล่มนั้น)</p></div>`;
   const draw = () => {
     const q = $('#q').value.trim().toLowerCase(), onlyLow = $('#onlyLow').checked;
     $('#rows').innerHTML = books
       .filter((b) => (!q || (b.code + ' ' + b.name).toLowerCase().includes(q)) && (!onlyLow || isLow(b)))
       .map((b) => `<tr class="${isSales() ? '' : 'click'} ${b.stock <= 0 ? 'zero' : isLow(b) ? 'low' : ''}" data-id="${b.id}">
-        <td>${esc(b.code)}</td><td>${esc(b.name)}</td><td class="num"><b>${num(b.stock)}</b></td><td>${esc(b.unit)}</td>${isSales() ? '' : `<td class="num">${num(b.min_qty)}</td>`}
+        <td>${thumb(b)}</td><td>${esc(b.code)}</td><td>${esc(b.name)}</td><td class="num"><b>${num(b.stock)}</b></td><td>${esc(b.unit)}</td>${isSales() ? '' : `<td class="num">${num(b.min_qty)}</td>`}
         <td class="num">${baht(b.price)}</td></tr>`).join('')
-      || `<tr><td colspan="${isSales() ? 5 : 6}" class="mute">ไม่พบรายการ</td></tr>`;
+      || `<tr><td colspan="${isSales() ? 6 : 7}" class="mute">ไม่พบรายการ</td></tr>`;
   };
   $('#q').oninput = $('#onlyLow').onchange = draw;
-  $('#rows').onclick = (e) => { const tr = e.target.closest('tr[data-id]'); if (tr && !isSales()) showCard(tr.dataset.id); };
+  $('#rows').onclick = (e) => {
+    if (e.target.dataset.zoom) return showImage(e.target.dataset.zoom);
+    const tr = e.target.closest('tr[data-id]'); if (tr && !isSales()) showCard(tr.dataset.id);
+  };
   if (low) $('#showLow').onclick = () => { $('#onlyLow').checked = true; draw(); $('#rows').scrollIntoView({ behavior: 'smooth' }); };
   draw();
 };
@@ -187,7 +222,7 @@ function docForm(type, saved) {
   let matches = [];
   const total = () => ($('#total').textContent = num(items.reduce((s, it) => s + (Number(it.qty) || 0), 0)));
   const draw = () => {
-    $('#items').innerHTML = items.map((it, i) => `<tr><td>${i + 1}</td><td>${esc(it.book.code)}</td><td>${esc(it.book.name)}</td>
+    $('#items').innerHTML = items.map((it, i) => `<tr><td>${i + 1}</td><td>${esc(it.book.code)}</td><td><div class="withimg">${thumb(it.book)}<span>${esc(it.book.name)}</span></div></td>
       <td class="num">${num(it.book.stock)}</td>${showPrice ? `<td class="num">${baht(it.book.price)}</td>` : ''}
       <td class="num"><input type="number" min="1" ${isOut ? `max="${it.book.stock}"` : ''} value="${it.qty}" data-i="${i}" style="width:100px;text-align:right"></td>
       <td><button class="btn danger sm" data-del="${i}">ลบ</button></td></tr>`).join('')
@@ -203,14 +238,17 @@ function docForm(type, saved) {
   pick.oninput = () => {
     const q = pick.value.trim().toLowerCase();
     matches = q ? state.books.filter((b) => b.active && (b.code + ' ' + b.name).toLowerCase().includes(q)).slice(0, 12) : [];
-    sugg.innerHTML = matches.map((b, i) => `<div data-i="${i}" class="${i ? '' : 'on'}"><span>${esc(b.code)} — ${esc(b.name)}</span><span class="mute">คงเหลือ ${num(b.stock)}${showPrice ? ` · ราคาปก ${baht(b.price)} บาท` : ''}</span></div>`).join('');
+    sugg.innerHTML = matches.map((b, i) => `<div data-i="${i}" class="${i ? '' : 'on'}"><span class="withimg">${thumb(b, 'sm')}<span>${esc(b.code)} — ${esc(b.name)}</span></span><span class="mute">คงเหลือ ${num(b.stock)}${showPrice ? ` · ราคาปก ${baht(b.price)} บาท` : ''}</span></div>`).join('');
     sugg.hidden = !matches.length;
   };
   pick.onkeydown = (e) => { if (e.key === 'Enter' && matches[0]) { e.preventDefault(); add(matches[0]); } };
   sugg.onclick = (e) => { const d = e.target.closest('[data-i]'); if (d) add(matches[d.dataset.i]); };
   $('#items').oninput = (e) => { if (e.target.dataset.i) { items[e.target.dataset.i].qty = Number(e.target.value); total(); } };
   $('#items').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); pick.focus(); } };
-  $('#items').onclick = (e) => { if (e.target.dataset.del) { items.splice(e.target.dataset.del, 1); draw(); } };
+  $('#items').onclick = (e) => {
+    if (e.target.dataset.zoom) showImage(e.target.dataset.zoom);
+    if (e.target.dataset.del) { items.splice(e.target.dataset.del, 1); draw(); }
+  };
   $('#save').onclick = async () => {
     const btn = $('#save');
     $('#err').textContent = '';
@@ -297,9 +335,10 @@ views.report = async () => {
 views.books = async () => {
   await loadBooks();
   main.innerHTML = `<h2>จัดการรายชื่อหนังสือ</h2><div class="card"><div class="bar">
-    <label class="grow">ค้นหา<input id="q" placeholder="รหัสหรือชื่อหนังสือ"></label><button class="btn" id="add">+ เพิ่มหนังสือ</button></div>
+    <label class="grow">ค้นหา<input id="q" placeholder="รหัสหรือชื่อหนังสือ"></label><button class="btn ghost" id="bulkImg">📷 นำเข้ารูปหลายไฟล์</button><button class="btn" id="add">+ เพิ่มหนังสือ</button></div>
+    <p class="mute">นำเข้ารูปหลายไฟล์: ตั้งชื่อไฟล์รูปเป็นรหัสหนังสือ เช่น ทข02001.jpg แล้วเลือกทุกไฟล์พร้อมกัน ระบบจะจับคู่กับหนังสือให้เอง</p>
     <p class="mute">แก้ยอดขั้นต่ำของแต่ละเล่มได้ในช่อง "ขั้นต่ำ" โดยตรง ระบบจะเตือนเมื่อคงเหลือต่ำกว่าจำนวนนี้ (0 = ไม่เตือน)</p>
-    <div class="tablewrap"><table><thead><tr><th>รหัส</th><th>ชื่อหนังสือ</th><th>หน่วย</th><th class="num">ขั้นต่ำ</th><th class="num">ราคาปก (บาท)</th><th>สถานะ</th><th></th></tr></thead><tbody id="rows"></tbody></table></div></div>`;
+    <div class="tablewrap"><table><thead><tr><th>รูป</th><th>รหัส</th><th>ชื่อหนังสือ</th><th>หน่วย</th><th class="num">ขั้นต่ำ</th><th class="num">ราคาปก (บาท)</th><th>สถานะ</th><th></th></tr></thead><tbody id="rows"></tbody></table></div></div>`;
   const edit = (b) => formDialog(b ? 'แก้ไขหนังสือ' : 'เพิ่มหนังสือ', [
     { name: 'code', label: 'รหัส', value: b?.code }, { name: 'name', label: 'ชื่อหนังสือ', value: b?.name },
     { name: 'unit', label: 'หน่วยนับ', value: b?.unit ?? 'เล่ม' },
@@ -310,7 +349,8 @@ views.books = async () => {
   const draw = () => {
     const q = $('#q').value.trim().toLowerCase();
     $('#rows').innerHTML = state.books.filter((b) => !q || (b.code + ' ' + b.name).toLowerCase().includes(q))
-      .map((b) => `<tr><td>${esc(b.code)}</td><td>${esc(b.name)}</td><td>${esc(b.unit)}</td><td class="num"><input type="number" min="0" step="1" value="${b.min_qty}" data-min="${b.id}" style="width:110px;text-align:right"></td>
+      .map((b) => `<tr><td><div class="withimg">${thumb(b)}<span><button class="link" data-img="${b.id}">${b.img ? 'เปลี่ยนรูป' : 'ใส่รูป'}</button>${b.img ? `<br><button class="link mute" data-delimg="${b.id}">ลบรูป</button>` : ''}</span></div></td>
+        <td>${esc(b.code)}</td><td>${esc(b.name)}</td><td>${esc(b.unit)}</td><td class="num"><input type="number" min="0" step="1" value="${b.min_qty}" data-min="${b.id}" style="width:110px;text-align:right"></td>
         <td class="num">${baht(b.price)}</td>
         <td>${b.active ? '<span class="tag in">ใช้งาน</span>' : '<span class="tag off">ปิด</span>'}</td>
         <td><button class="btn ghost sm" data-id="${b.id}">แก้ไข</button></td></tr>`).join('');
@@ -331,7 +371,49 @@ views.books = async () => {
   $('#rows').onkeydown = (e) => { if (e.key === 'Enter' && e.target.dataset.min) e.target.blur(); };
   $('#q').oninput = draw;
   $('#add').onclick = () => edit(null);
-  $('#rows').onclick = (e) => e.target.dataset.id && edit(state.books.find((b) => b.id == e.target.dataset.id));
+  const book = (id) => state.books.find((b) => b.id == id);
+  const refresh = async () => { await loadBooks(); draw(); };
+  $('#rows').onclick = async (e) => {
+    const d = e.target.dataset;
+    try {
+      if (d.id) edit(book(d.id));
+      else if (d.zoom) showImage(d.zoom);
+      else if (d.img) {
+        const [file] = await pickFiles(false);
+        if (!file) return;
+        await api(`/api/books/${d.img}/image`, 'PUT', { image: await shrinkImage(file) });
+        toast(`บันทึกรูป ${book(d.img).code} แล้ว`); await refresh();
+      } else if (d.delimg) {
+        const b = book(d.delimg);
+        if (!confirm(`ลบรูปของ ${b.code} ${b.name} ?`)) return;
+        await api(`/api/books/${b.id}/image`, 'DELETE');
+        toast(`ลบรูป ${b.code} แล้ว`); await refresh();
+      }
+    } catch (err) { toast(err.message, true); }
+  };
+  // นำเข้าหลายรูป: ชื่อไฟล์ (ไม่รวมนามสกุล) = รหัสหนังสือ
+  $('#bulkImg').onclick = async () => {
+    const files = await pickFiles(true);
+    if (!files.length) return;
+    const byCode = new Map(state.books.map((b) => [b.code.trim().toLowerCase(), b]));
+    const done = [], skipped = [], failed = [];
+    for (const [i, f] of files.entries()) {
+      const b = byCode.get(f.name.replace(/\.[^.]+$/, '').trim().toLowerCase());
+      if (!b) { skipped.push(f.name); continue; }
+      toast(`กำลังนำเข้ารูป ${i + 1} / ${files.length} ...`);
+      try { await api(`/api/books/${b.id}/image`, 'PUT', { image: await shrinkImage(f) }); done.push(b.code); }
+      catch (err) { failed.push(`${f.name}: ${err.message}`); }
+    }
+    await refresh();
+    dlg.className = '';
+    dlg.innerHTML = `<h3>นำเข้ารูปเสร็จแล้ว</h3>
+      <p>✔ นำเข้าสำเร็จ <b>${num(done.length)}</b> รูป</p>
+      ${skipped.length ? `<p>ไม่พบรหัสหนังสือตามชื่อไฟล์ <b>${num(skipped.length)}</b> ไฟล์ (ข้ามไป):</p><p class="mute">${skipped.map(esc).join(', ')}</p>` : ''}
+      ${failed.length ? `<p class="err">นำเข้าไม่สำเร็จ ${num(failed.length)} ไฟล์:<br>${failed.map(esc).join('<br>')}</p>` : ''}
+      <div class="actions"><button class="btn" data-close>ตกลง</button></div>`;
+    $('[data-close]', dlg).onclick = () => dlg.close();
+    dlg.showModal();
+  };
   draw();
 };
 
