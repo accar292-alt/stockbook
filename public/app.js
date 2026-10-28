@@ -13,8 +13,8 @@ const baht = (n) => { const v = Number(n || 0); return v.toLocaleString('th-TH',
 const isAdmin = () => state.user?.role === 'admin';
 const TYPES = {
   IN: { cls: 'in', sign: '▼', title: 'รับเข้าสินค้า', tag: 'รับ', desc: 'บันทึกรับสินค้าเข้าคลัง — ยอดสต็อกจะเพิ่มขึ้น', slip: 'ใบรับเข้า', save: 'บันทึกรับเข้าสินค้า', qty: 'จำนวนรับ' },
-  OUT: { cls: 'out', sign: '▲', title: 'เบิกจ่ายสินค้า', tag: 'เบิก', desc: 'บันทึกเบิกจ่ายสินค้าออกจากคลัง — ยอดสต็อกจะลดลง', slip: 'ใบเบิกจ่าย', save: 'บันทึกและพิมพ์ใบเบิกจ่าย', qty: 'จำนวนเบิก' },
-  DMG: { cls: 'dmg', sign: '✖', title: 'ตัดชำรุด/เสียหาย', tag: 'ชำรุด', desc: 'ตัดสินค้าชำรุด เสียหาย หรือสูญหายออกจากคลัง — ยอดสต็อกจะลดลง', slip: 'ใบตัดชำรุด', save: 'บันทึกและพิมพ์ใบตัดชำรุด', qty: 'จำนวนที่ตัด' },
+  OUT: { cls: 'out', sign: '▲', title: 'เบิกจ่ายสินค้า', tag: 'เบิก', desc: 'บันทึกเบิกจ่ายสินค้าออกจากคลัง — ยอดสต็อกจะลดลง', slip: 'ใบเบิกจ่าย', save: 'บันทึกใบเบิกจ่าย', print: true, qty: 'จำนวนเบิก' },
+  DMG: { cls: 'dmg', sign: '✖', title: 'ตัดชำรุด/เสียหาย', tag: 'ชำรุด', desc: 'ตัดสินค้าชำรุด เสียหาย หรือสูญหายออกจากคลัง — ยอดสต็อกจะลดลง', slip: 'ใบตัดชำรุด', save: 'บันทึกใบตัดชำรุด', print: true, qty: 'จำนวนที่ตัด' },
 };
 const DMG_REASONS = ['ชำรุด', 'เสียหาย', 'สูญหาย', 'พิมพ์ผิด', 'อื่น ๆ'];
 const typeTag = (t) => `<span class="tag ${TYPES[t].cls}">${TYPES[t].tag}</span>`;
@@ -176,7 +176,10 @@ function docForm(type, saved) {
     <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>#</th><th>รหัส</th><th>ชื่อหนังสือ</th><th class="num">คงเหลือ</th>${showPrice ? '<th class="num">ราคาปก (บาท)</th>' : ''}<th class="num">${T.qty}</th><th></th></tr></thead><tbody id="items"></tbody>
       <tfoot><tr><th colspan="${showPrice ? 5 : 4}" class="num">รวมจำนวน</th><th class="num" id="total">0</th><th></th></tr></tfoot></table></div>
     <div class="err" id="err"></div>
-    <div class="actions"><button class="btn big ${T.cls}" id="save">${T.save}</button></div></div>`;
+    <div class="actions">
+      ${T.print ? `<span class="mute" id="printHint">${saved ? `พิมพ์ใบ ${esc(saved.doc_no)} ที่เพิ่งบันทึก` : 'บันทึกก่อน จึงจะพิมพ์ได้'}</span>
+        <button class="btn big ghost" id="print" ${saved ? '' : 'disabled'}>🖨 พิมพ์${T.slip}</button>` : ''}
+      <button class="btn big ${T.cls}" id="save">${T.save}</button></div></div>`;
   const pick = $('#pick'), sugg = $('#sugg');
   let matches = [];
   const total = () => ($('#total').textContent = num(items.reduce((s, it) => s + (Number(it.qty) || 0), 0)));
@@ -209,18 +212,16 @@ function docForm(type, saved) {
     const btn = $('#save');
     $('#err').textContent = '';
     btn.disabled = true;
-    // เปิดแท็บไว้ก่อนตั้งแต่ตอนคลิก เพื่อไม่ให้เบราว์เซอร์บล็อกป๊อปอัป
-    const slip = isOut ? window.open('about:blank') : null;
     try {
       const doc = await api('/api/docs', 'POST', {
         type, date: $('#date').value, party: $('#party')?.value ?? '', po_no: $('#po_no')?.value ?? '', dept: $('#dept')?.value ?? '', reason: $('#reason')?.value ?? '', note: $('#note').value,
         items: items.map((it) => ({ book_id: it.book.id, qty: it.qty })) });
       toast(`บันทึกเอกสาร ${doc.doc_no} แล้ว`);
-      if (slip) slip.location = `/slip.html?id=${doc.id}`;
       await loadBooks();
       docForm(type, doc);
-    } catch (err) { slip?.close(); $('#err').textContent = err.message; btn.disabled = false; }
+    } catch (err) { $('#err').textContent = err.message; btn.disabled = false; }
   };
+  if (T.print && saved) $('#print').onclick = () => window.open(`/slip.html?id=${saved.id}&print=1`);
   draw();
   ({ IN: $('#party'), OUT: $('#po_no'), DMG: $('#reason') })[type].focus();
 }

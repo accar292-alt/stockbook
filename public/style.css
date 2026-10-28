@@ -103,3 +103,5 @@ button.btn.dmg { background: var(--dmg); border-color: var(--dmg); }
 button.btn.dmg:hover { background: #912018; }
 .tag.dmg { background: #fde8e7; color: var(--dmg); }
 input.locked { background: #eef1f5; color: var(--text); font-weight: 600; cursor: not-allowed; }
+button.btn:disabled { opacity: .45; cursor: not-allowed; }
+.actions { align-items: center; flex-wrap: wrap; }

@@ -61,6 +61,7 @@ const baht = (n) => { const v = Number(n || 0); return v.toLocaleString('th-TH',
     <tfoot><tr><th colspan="4" class="r">รวม ${d.items.length} รายการ</th><th class="r">${num(d.items.reduce((s, it) => s + it.qty, 0))}</th><th></th></tr></tfoot></table>
     <div class="signs">${signs.map(([s, name]) => `<div>ลงชื่อ ..............................................<br>( ${name ? esc(name) : '..............................................'} )<br>${s}<br>วันที่ ......... / ......... / .........</div>`).join('')}</div>
     <div class="foot">บันทึกโดย ${esc(d.created_by_name)}${d.cancelled ? ` · ยกเลิกโดย ${esc(d.cancelled_by_name)}` : ''}</div>`;
+  if (new URLSearchParams(location.search).get('print') === '1') { await document.fonts.ready; window.print(); }
 })();
 </script>
 </body>
