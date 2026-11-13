@@ -174,3 +174,14 @@ table.rtable th.num { text-align: right; }
 .hist-item s { color: var(--mute); }
 .edit-reason { margin-top: 8px; }
 .edited { font-size: .78em; color: var(--info); white-space: nowrap; }
+.addr-hint { font-size: .88em; margin-top: -4px; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.addr-hint.ok { color: var(--ok); }
+.addr-hint.new { color: var(--info); }
+.addr-hint.diff { color: var(--wait); }
+@media screen and (max-width: 700px) {
+  table.ctable thead { display: none; }
+  table.ctable, table.ctable tbody, table.ctable tr, table.ctable td { display: block; border: 0; padding: 1px 0; }
+  table.ctable tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  table.ctable td[data-l]::before { content: attr(data-l) ": "; color: var(--mute); }
+  table.ctable td.num { text-align: left; }
+}

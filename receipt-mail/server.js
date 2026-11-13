@@ -79,6 +79,12 @@ const SCHEMA = `
     after TEXT NOT NULL DEFAULT '{}', reason TEXT NOT NULL DEFAULT ''
   );
   CREATE INDEX IF NOT EXISTS idx_edits_parcel ON parcel_edits(parcel_id);
+  -- สมุดที่อยู่ลูกค้า (ใช้เติมที่อยู่ตอนบันทึกซอง; ซองเก็บสำเนาที่อยู่ของตัวเอง แก้สมุดแล้วซองเก่าไม่เปลี่ยน)
+  CREATE TABLE IF NOT EXISTS customers (
+    id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, address TEXT NOT NULL DEFAULT '',
+    phone TEXT NOT NULL DEFAULT '', carrier TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '',
+    updated_by INTEGER REFERENCES users(id), updated_at TEXT
+  );
   CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   INSERT OR IGNORE INTO settings VALUES ('org_name', 'บริษัทของฉัน');
 `;
@@ -96,6 +102,14 @@ const ensureReady = () => (ready ??= (async () => {
     const ecols = (await db.all(`SELECT name FROM pragma_table_info('parcel_edits')`)).map((c) => c.name);
     if (!ecols.includes('after')) await db.run(`ALTER TABLE parcel_edits ADD COLUMN after TEXT NOT NULL DEFAULT '{}'`);
     if (!ecols.includes('reason')) await db.run(`ALTER TABLE parcel_edits ADD COLUMN reason TEXT NOT NULL DEFAULT ''`);
+    // ครั้งแรก: สร้างสมุดที่อยู่จากที่อยู่ล่าสุดที่เคยส่งให้ลูกค้าแต่ละราย
+    if (!(await db.get(`SELECT 1 FROM settings WHERE key = 'customers_seeded'`))) {
+      await client.batch([
+        `INSERT OR IGNORE INTO customers (name, address, carrier) SELECT customer, destination, carrier FROM parcels
+           WHERE id IN (SELECT MAX(id) FROM parcels WHERE deleted = 0 GROUP BY customer)`,
+        `INSERT OR IGNORE INTO settings VALUES ('customers_seeded', '1')`,
+      ], 'write');
+    }
   }
   catch (e) { throw new HttpError(500, `เชื่อมต่อฐานข้อมูลไม่ได้: ${e.message}`); }
 })().catch((e) => { ready = null; throw e; }));
@@ -387,11 +401,49 @@ app.post('/api/check', auth, async (req, res) => {
   res.json({ receipts, tracking: parcels });
 });
 
-// รายชื่อลูกค้าพร้อมที่อยู่ล่าสุดที่เคยส่ง (ช่วยกรอกให้เร็วขึ้น)
+// ---------- สมุดที่อยู่ลูกค้า ----------
+function customerInput(b) {
+  const c = { name: str(b.name, 200), address: str(b.address, 500), phone: str(b.phone, 100), carrier: str(b.carrier, 60), note: str(b.note, 300) };
+  if (!c.name) fail(400, 'กรอกชื่อลูกค้า');
+  return c;
+}
 app.get('/api/customers', auth, async (req, res) => {
-  res.json(await db.all(`SELECT customer, destination, carrier FROM parcels
-    WHERE id IN (SELECT MAX(id) FROM parcels WHERE deleted = 0 GROUP BY customer) ORDER BY customer`));
+  res.json(await db.all(`SELECT c.id, c.name, c.address, c.phone, c.carrier, c.note, c.updated_at, u.name AS updated_name,
+      (SELECT COUNT(*) FROM parcels p WHERE p.customer = c.name AND p.deleted = 0) AS parcel_count
+    FROM customers c LEFT JOIN users u ON u.id = c.updated_by ORDER BY c.name`));
 });
+app.post('/api/customers', auth, async (req, res) => {
+  const c = customerInput(req.body);
+  if (await db.get('SELECT 1 FROM customers WHERE name = ?', c.name)) fail(400, `มีลูกค้าชื่อ "${c.name}" ในสมุดแล้ว`);
+  const r = await db.run('INSERT INTO customers (name, address, phone, carrier, note, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    c.name, c.address, c.phone, c.carrier, c.note, req.user.id, now());
+  res.json({ ok: true, id: r.lastInsertRowid });
+});
+app.put('/api/customers/:id', auth, async (req, res) => {
+  const id = Number(req.params.id), c = customerInput(req.body);
+  if (await db.get('SELECT 1 FROM customers WHERE name = ? AND id <> ?', c.name, id)) fail(400, `มีลูกค้าชื่อ "${c.name}" ในสมุดแล้ว`);
+  const r = await db.run('UPDATE customers SET name = ?, address = ?, phone = ?, carrier = ?, note = ?, updated_by = ?, updated_at = ? WHERE id = ?',
+    c.name, c.address, c.phone, c.carrier, c.note, req.user.id, now(), id);
+  if (!r.changes) fail(404, 'ไม่พบลูกค้า');
+  res.json({ ok: true });
+});
+// ลบจากสมุดเท่านั้น ซองที่เคยส่งยังอยู่ครบ
+app.delete('/api/customers/:id', admin, async (req, res) => {
+  const r = await db.run('DELETE FROM customers WHERE id = ?', Number(req.params.id));
+  if (!r.changes) fail(404, 'ไม่พบลูกค้า');
+  res.json({ ok: true });
+});
+// ตอนบันทึกซอง: ลูกค้าใหม่ → เพิ่มลงสมุด; ลูกค้าเดิม → อัปเดตที่อยู่เมื่อผู้ใช้เลือก "อัปเดตที่อยู่ในสมุด"
+async function rememberCustomer(p, update, userId) {
+  const ex = await db.get('SELECT id, address FROM customers WHERE name = ?', p.customer);
+  if (!ex) {
+    await db.run('INSERT OR IGNORE INTO customers (name, address, carrier, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)',
+      p.customer, p.destination, p.carrier, userId, now());
+  } else if (update && p.destination && p.destination !== ex.address) {
+    await db.run('UPDATE customers SET address = ?, carrier = CASE WHEN ? <> \'\' THEN ? ELSE carrier END, updated_by = ?, updated_at = ? WHERE id = ?',
+      p.destination, p.carrier, p.carrier, userId, now(), ex.id);
+  }
+}
 
 const insertReceipts = (id, list) => list.map((r) => ({ sql: 'INSERT INTO parcel_receipts (parcel_id, receipt_no, bill_date, customer, amount, detail) VALUES (?, ?, ?, ?, ?, ?)',
   args: [id, r.receipt_no, r.bill_date, r.customer || '', r.amount ?? null, r.detail || ''] }));
@@ -450,7 +502,10 @@ function updateStatements(old, p, userId, t, reason = '') {
 }
 
 app.post('/api/parcels', auth, async (req, res) => {
-  res.json({ ok: true, id: await createParcel(parcelInput(req.body), req.user.id) });
+  const p = parcelInput(req.body);
+  const id = await createParcel(p, req.user.id);
+  await rememberCustomer(p, !!req.body.save_address, req.user.id);
+  res.json({ ok: true, id });
 });
 
 app.put('/api/parcels/:id', auth, async (req, res) => {
@@ -464,6 +519,7 @@ app.put('/api/parcels/:id', auth, async (req, res) => {
   if (!stmts.length) return res.json({ ok: true, unchanged: true });
   if (!reason) fail(400, 'กรอกหมายเหตุการแก้ไข ว่าแก้อะไรและเพราะอะไร');
   await client.batch(stmts, 'write');
+  await rememberCustomer(parcelInput(body), !!req.body.save_address, req.user.id);
   res.json({ ok: true });
 });
 
@@ -494,12 +550,13 @@ const IMPORT_COLS = {
 };
 const normHead = (s) => String(s ?? '').toLowerCase().replace(/[\s._\-/()*:]/g, '');
 const ALIASES = Object.entries(IMPORT_COLS).flatMap(([k, list]) => list.map((a) => [k, normHead(a)])).sort((a, b) => b[1].length - a[1].length);
-function mapHeader(row) {
+const makeAliases = (cols) => Object.entries(cols).flatMap(([k, list]) => list.map((a) => [k, normHead(a)])).sort((a, b) => b[1].length - a[1].length);
+function mapHeader(row, aliases = ALIASES) {
   const map = {};
   row.forEach((cell, i) => {
     const h = normHead(cell);
     if (!h) return;
-    const hit = ALIASES.find(([k, a]) => !(k in map) && h === a) || ALIASES.find(([k, a]) => !(k in map) && h.includes(a));
+    const hit = aliases.find(([k, a]) => !(k in map) && h === a) || aliases.find(([k, a]) => !(k in map) && h.includes(a));
     if (hit) map[hit[0]] = i;
   });
   return map;
@@ -653,6 +710,59 @@ app.post('/api/import', auth, async (req, res) => {
     await tx.commit();
   } catch (e) { await tx.rollback().catch(() => {}); throw e; }
   finally { tx.close(); }
+  for (const { p } of creates) await rememberCustomer(p, false, req.user.id); // ลูกค้าใหม่จากไฟล์ → ลงสมุดที่อยู่
+  res.json({ ...summary, committed: true });
+});
+
+// สมุดที่อยู่: 1 แถว = ลูกค้า 1 ราย; ชื่อซ้ำกับที่มีอยู่ → อัปเดตที่อยู่ (mode update) หรือข้าม (mode skip)
+const CUSTOMER_ALIASES = makeAliases({
+  name: ['ชื่อลูกค้า', 'ลูกค้า', 'ชื่อบริษัท', 'ชื่อ', 'customer', 'name'],
+  address: ['ที่อยู่จัดส่ง', 'ที่อยู่', 'ส่งไปที่', 'address'],
+  phone: ['เบอร์โทรศัพท์', 'เบอร์โทร', 'โทรศัพท์', 'โทร', 'phone', 'tel'],
+  carrier: ['ส่งทาง', 'ขนส่ง', 'carrier'],
+  note: ['หมายเหตุ', 'note', 'remark'],
+});
+app.post('/api/customers/import', auth, async (req, res) => {
+  let wb;
+  try { wb = XLSX.read(Buffer.from(String(req.body.file || ''), 'base64'), { type: 'buffer' }); }
+  catch { fail(400, 'อ่านไฟล์ไม่ได้ — ต้องเป็นไฟล์ Excel (.xlsx / .xls) หรือ .csv'); }
+  let best = null;
+  for (const name of wb.SheetNames) {
+    const g = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: false, defval: '' });
+    g.slice(0, 15).forEach((row, i) => {
+      const m = mapHeader(row, CUSTOMER_ALIASES), score = Object.keys(m).length;
+      if ('name' in m && 'address' in m && (!best || score > best.score)) best = { grid: g, headIdx: i, map: m, score };
+    });
+  }
+  if (!best) fail(400, 'ไม่พบหัวคอลัมน์ "ชื่อลูกค้า" และ "ที่อยู่" ในไฟล์');
+  const existing = new Map((await db.all('SELECT id, name, address, phone, carrier, note FROM customers')).map((c) => [c.name, c]));
+  const update = req.body.mode === 'update', seen = new Set(), adds = [], ups = [], errors = [];
+  let skipped = 0;
+  for (let i = best.headIdx + 1; i < best.grid.length; i++) {
+    const row = best.grid[i], get = (k) => (k in best.map ? row[best.map[k]] : '');
+    if (!Object.values(best.map).some((c) => String(row[c] ?? '').trim())) continue;
+    const c = { name: str(get('name'), 200), address: str(get('address'), 500), phone: str(get('phone'), 100), carrier: str(get('carrier'), 60), note: str(get('note'), 300) };
+    if (!c.name) { errors.push({ line: i + 1, msg: 'ไม่มีชื่อลูกค้า' }); continue; }
+    if (seen.has(c.name)) { errors.push({ line: i + 1, msg: `ชื่อ "${c.name}" ซ้ำกับแถวก่อนหน้า` }); continue; }
+    seen.add(c.name);
+    const ex = existing.get(c.name);
+    if (!ex) adds.push(c);
+    else if (!update) skipped++;
+    else {
+      const merged = { ...ex, ...Object.fromEntries(Object.entries(c).filter(([, v]) => v)) };
+      if (['address', 'phone', 'carrier', 'note'].some((k) => merged[k] !== ex[k])) ups.push(merged); else skipped++;
+    }
+  }
+  const summary = { add: adds.length, update: ups.length, skipped, errors: errors.slice(0, 100), errorCount: errors.length, preview: [...adds, ...ups].slice(0, 30) };
+  if (!req.body.commit) return res.json(summary);
+  if (!adds.length && !ups.length) fail(400, 'ไม่มีรายการให้นำเข้า');
+  const t = now();
+  await client.batch([
+    ...adds.map((c) => ({ sql: 'INSERT INTO customers (name, address, phone, carrier, note, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      args: [c.name, c.address, c.phone, c.carrier, c.note, req.user.id, t] })),
+    ...ups.map((c) => ({ sql: 'UPDATE customers SET address = ?, phone = ?, carrier = ?, note = ?, updated_by = ?, updated_at = ? WHERE id = ?',
+      args: [c.address, c.phone, c.carrier, c.note, req.user.id, t, c.id] })),
+  ], 'write');
   res.json({ ...summary, committed: true });
 });
 

@@ -117,7 +117,7 @@ $('#btnPassword').onclick = () => {
 };
 
 // ---------- nav ----------
-const PAGES = { list: 'รายการซองที่ส่ง', new: '+ บันทึกซองใหม่', admin: 'ผู้ใช้และตั้งค่า' };
+const PAGES = { list: 'รายการซองที่ส่ง', new: '+ บันทึกซองใหม่', customers: 'สมุดที่อยู่ลูกค้า', admin: 'ผู้ใช้และตั้งค่า' };
 function renderNav() {
   $('#nav').innerHTML = Object.entries(PAGES).filter(([k]) => k !== 'admin' || isAdmin())
     .map(([k, t]) => `<button data-page="${k}">${t}</button>`).join('');
@@ -127,7 +127,7 @@ function go(page) {
   if (!PAGES[page] || (page === 'admin' && !isAdmin())) page = 'list';
   if (location.hash.slice(1) !== page) history.replaceState(null, '', '#' + page);
   $$('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.page === page));
-  ({ list: listPage, new: newPage, admin: adminPage })[page]();
+  ({ list: listPage, new: newPage, customers: customersPage, admin: adminPage })[page]();
 }
 window.addEventListener('hashchange', () => S.user && go(location.hash.slice(1)));
 
@@ -167,6 +167,7 @@ function parcelFields(p = {}) {
         <label>เลขพัสดุ<input name="tracking_no" value="${esc(p.tracking_no)}" autocomplete="off" placeholder="เช่น EF123456789TH"></label>
       </div>
       <label>ส่งไปที่ (ชื่อผู้รับ / ที่อยู่)<textarea name="destination" rows="3">${esc(p.destination)}</textarea></label>
+      <div class="addr-hint" hidden></div>
       <label>หมายเหตุ<input name="note" value="${esc(p.note)}"></label>
     </fieldset>
     <datalist id="carrierList">${S.carriers.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
@@ -229,12 +230,45 @@ async function wireParcelForm(form, excludeId = 0) {
   tbody.addEventListener('change', () => check());
 
   const list = await loadCustomers();
-  $('#custList', form).innerHTML = list.map((c) => `<option value="${esc(c.customer)}">`).join('');
-  f.customer.addEventListener('change', () => {
-    const c = list.find((x) => x.customer === f.customer.value.trim());
-    if (c && !f.destination.value.trim()) f.destination.value = c.destination;
-    if (c && !f.carrier.value.trim()) f.carrier.value = c.carrier;
+  $('#custList', form).innerHTML = list.map((c) => `<option value="${esc(c.name)}">${esc(c.address.split('\n')[0])}</option>`).join('');
+  // ที่อยู่จากสมุดลูกค้า: เลือกชื่อแล้วเติมที่อยู่ให้ (ไม่ทับที่อยู่ที่พิมพ์เอง)
+  const hint = $('.addr-hint', form);
+  let autoFilled = f.destination.value;
+  const book = () => list.find((x) => x.name === f.customer.value.trim());
+  const showHint = () => {
+    const name = f.customer.value.trim(), c = book(), addr = f.destination.value.trim();
+    hint.hidden = !name;
+    if (!name) return;
+    if (!c) {
+      hint.className = 'addr-hint new';
+      hint.innerHTML = 'ลูกค้าใหม่ — ตอนบันทึกจะเพิ่มชื่อและที่อยู่นี้ลงสมุดที่อยู่ลูกค้าให้อัตโนมัติ';
+    } else if (addr === c.address.trim()) {
+      hint.className = 'addr-hint ok';
+      hint.innerHTML = `✓ ใช้ที่อยู่จากสมุดลูกค้า${c.phone ? ` · โทร ${esc(c.phone)}` : ''}`;
+    } else {
+      hint.className = 'addr-hint diff';
+      hint.innerHTML = `ที่อยู่ไม่ตรงกับสมุดลูกค้า${c.address ? ` (ในสมุด: ${esc(c.address.replace(/\n/g, ' '))})` : ' (ในสมุดยังไม่มีที่อยู่)'}
+        <label class="checkrow"><input type="checkbox" name="save_address"${c.address ? '' : ' checked'}> อัปเดตที่อยู่นี้ลงสมุดลูกค้าด้วย</label>
+        ${c.address ? '<button type="button" class="btn ghost sm" data-use-book>ใช้ที่อยู่ในสมุด</button>' : ''}`;
+      const btn = $('[data-use-book]', hint);
+      if (btn) btn.onclick = () => { f.destination.value = c.address; autoFilled = c.address; showHint(); };
+    }
+  };
+  const fillFromBook = () => {
+    const c = book();
+    if (c && (!f.destination.value.trim() || f.destination.value === autoFilled)) { f.destination.value = c.address; autoFilled = c.address; }
+    if (c && c.carrier && !f.carrier.value.trim()) f.carrier.value = c.carrier;
+    showHint();
+  };
+  f.customer.addEventListener('input', () => { if (book()) fillFromBook(); else showHint(); });
+  f.customer.addEventListener('change', fillFromBook);
+  f.destination.addEventListener('input', () => {
+    const keep = $('[name=save_address]', hint)?.checked;
+    showHint();
+    const cb = $('[name=save_address]', hint);
+    if (cb && keep) cb.checked = true;
   });
+  if (f.customer.value) showHint();
   f.tracking_no.addEventListener('change', () => {
     if (f.tracking_no.value.trim() && !f.sent_date.value) f.sent_date.value = today();
     check();
@@ -689,6 +723,104 @@ function importDialog() {
   onSubmit(form, async (v) => {
     const r = await api('/api/import', { body: { file: b64, mode: v.mode, commit: true } });
     d.close(); toast(`นำเข้าแล้ว: ซองใหม่ ${r.createParcels} · อัปเดต ${r.updateParcels}`); loadCustomers(true); load();
+  });
+}
+
+// ---------- สมุดที่อยู่ลูกค้า ----------
+let custQ = '';
+async function customersPage() {
+  $('#main').innerHTML = `<h2>สมุดที่อยู่ลูกค้า</h2>
+    <p class="mute">ตอนบันทึกซอง พิมพ์ชื่อลูกค้าแล้วระบบจะเติมที่อยู่จากสมุดนี้ให้ ลูกค้าใหม่จะถูกเพิ่มลงสมุดให้อัตโนมัติ
+      (แก้ที่อยู่ในสมุดแล้ว ซองที่บันทึกไปก่อนหน้าจะไม่เปลี่ยน)</p>
+    <div class="card">
+      <div class="bar">
+        <label class="grow">ค้นหา (ชื่อ / ที่อยู่ / เบอร์โทร)<input id="cq" type="search" value="${esc(custQ)}"></label>
+        <button class="btn" id="cAdd">+ เพิ่มลูกค้า</button>
+        <button class="btn ghost" id="cImport">นำเข้า Excel</button>
+      </div>
+      <div class="tablewrap" id="ctbl"><p class="mute">กำลังโหลด…</p></div>
+    </div>`;
+  $('#cAdd').onclick = () => customerDialog();
+  $('#cImport').onclick = customerImportDialog;
+  const list = await loadCustomers(true);
+  const render = () => {
+    const q = custQ.trim().toLowerCase();
+    const rows = list.filter((c) => !q || [c.name, c.address, c.phone, c.note].some((x) => (x || '').toLowerCase().includes(q)));
+    $('#ctbl').innerHTML = rows.length ? `<table class="ctable"><thead><tr><th>ชื่อลูกค้า</th><th>ที่อยู่</th><th>เบอร์โทร</th><th>ส่งทาง</th><th class="num">ซองที่ส่ง</th><th></th></tr></thead>
+      <tbody>${rows.map((c) => `<tr class="click" data-cid="${c.id}"><td><b>${esc(c.name)}</b>${c.note ? `<div class="mute">${esc(c.note)}</div>` : ''}</td>
+        <td class="addr" data-l="ที่อยู่">${esc(c.address).replace(/\n/g, '<br>') || '<span class="mute">ยังไม่มีที่อยู่</span>'}</td>
+        <td class="nowrap" data-l="โทร">${esc(c.phone) || '<span class="mute">-</span>'}</td><td data-l="ส่งทาง">${esc(c.carrier) || '<span class="mute">-</span>'}</td>
+        <td class="num" data-l="ซองที่ส่ง">${c.parcel_count}</td><td class="nowrap"><button class="btn ghost sm" data-edit="${c.id}">แก้ไข</button></td></tr>`).join('')}</tbody></table>
+      <p class="mute">ทั้งหมด ${list.length} ราย${q ? ` · พบ ${rows.length} ราย` : ''}</p>` : `<p class="mute">${list.length ? 'ไม่พบลูกค้าที่ค้นหา' : 'ยังไม่มีลูกค้าในสมุด — กด "+ เพิ่มลูกค้า" หรือนำเข้าจาก Excel'}</p>`;
+    $$('#ctbl tr[data-cid]').forEach((tr) => (tr.onclick = () => customerDialog(list.find((c) => c.id === Number(tr.dataset.cid)))));
+  };
+  let t;
+  $('#cq').oninput = () => { clearTimeout(t); t = setTimeout(() => { custQ = $('#cq').value; render(); }, 150); };
+  render();
+}
+
+function customerDialog(c) {
+  const d = dialog(`<h3>${c ? 'แก้ไขข้อมูลลูกค้า' : 'เพิ่มลูกค้า'}</h3><form>
+    <label><span>ชื่อลูกค้า <b class="req">*</b></span><input name="name" required value="${esc(c?.name)}" autocomplete="off"></label>
+    <label>ที่อยู่สำหรับส่งเอกสาร (ชื่อผู้รับ / ที่อยู่ / รหัสไปรษณีย์)<textarea name="address" rows="4">${esc(c?.address)}</textarea></label>
+    <div class="grid">
+      <label>เบอร์โทร<input name="phone" value="${esc(c?.phone)}" autocomplete="off"></label>
+      <label>ส่งทาง (ค่าเริ่มต้น)<input name="carrier" list="carrierList3" value="${esc(c?.carrier)}" autocomplete="off"></label>
+    </div>
+    <label>หมายเหตุ<input name="note" value="${esc(c?.note)}" placeholder="เช่น ส่งถึงฝ่ายบัญชี คุณ…"></label>
+    <datalist id="carrierList3">${S.carriers.map((x) => `<option value="${esc(x)}">`).join('')}</datalist>
+    ${c ? `<p class="mute">ส่งไปแล้ว ${c.parcel_count} ซอง${c.updated_at ? ` · แก้ล่าสุด ${esc(c.updated_name || '')} ${thTime(c.updated_at)}` : ''}</p>` : ''}
+    <div class="err"></div><div class="actions">
+      ${c && isAdmin() ? '<button type="button" class="btn danger left" id="cDel">ลบออกจากสมุด</button>' : ''}
+      <button type="button" class="btn ghost" data-close>ยกเลิก</button><button class="btn" type="submit">บันทึก</button></div></form>`);
+  onSubmit($('form', d), async (v) => {
+    if (c) await api(`/api/customers/${c.id}`, { method: 'PUT', body: v }); else await api('/api/customers', { body: v });
+    d.close(); toast('บันทึกข้อมูลลูกค้าแล้ว'); customersPage();
+  });
+  const del = $('#cDel', d);
+  if (del) del.onclick = async () => {
+    if (del.dataset.sure !== '1') { del.dataset.sure = '1'; del.textContent = 'กดอีกครั้งเพื่อยืนยันลบ'; return; }
+    try { await api(`/api/customers/${c.id}`, { method: 'DELETE' }); d.close(); toast('ลบออกจากสมุดแล้ว (ซองที่เคยส่งยังอยู่ครบ)'); customersPage(); }
+    catch (e) { toast(e.message, true); }
+  };
+}
+
+function customerImportDialog() {
+  const d = dialog(`<h3>นำเข้าสมุดที่อยู่จาก Excel</h3>
+    <p class="mute">ไฟล์ต้องมีคอลัมน์ <b>ชื่อลูกค้า</b> และ <b>ที่อยู่</b> (มี เบอร์โทร, ส่งทาง, หมายเหตุ ด้วยก็ได้) · 1 แถว = ลูกค้า 1 ราย</p>
+    <form>
+      <label>ไฟล์ Excel (.xlsx, .xls, .csv)<input type="file" name="file" accept=".xlsx,.xls,.csv" required></label>
+      <label>ถ้ามีชื่อลูกค้านี้ในสมุดแล้ว<select name="mode"><option value="skip">ข้าม (เพิ่มเฉพาะลูกค้าใหม่)</option>
+        <option value="update">อัปเดตที่อยู่/เบอร์โทรตามไฟล์</option></select></label>
+      <div id="ciResult"></div><div class="err"></div>
+      <div class="actions"><button type="button" class="btn ghost" data-close>ยกเลิก</button><button class="btn" type="submit" id="ciGo" disabled>นำเข้า</button></div>
+    </form>`, true);
+  const form = $('form', d), out = $('#ciResult', d), go = $('#ciGo', d);
+  let b64 = '';
+  const check = async () => {
+    go.disabled = true; $('.err', form).textContent = ''; out.innerHTML = b64 ? '<p class="mute">กำลังตรวจไฟล์…</p>' : '';
+    if (!b64) return;
+    try {
+      const r = await api('/api/customers/import', { body: { file: b64, mode: form.elements.mode.value } });
+      const n = r.add + r.update;
+      out.innerHTML = `<div class="card" style="margin:0"><b>ตรวจแล้ว</b>: เพิ่มใหม่ <b>${r.add}</b> · อัปเดต <b>${r.update}</b> · ข้าม ${r.skipped}
+        ${r.errorCount ? ` · <span style="color:var(--bad)">มีปัญหา ${r.errorCount} แถว</span><div class="warn" style="margin-top:6px">${r.errors.map((e) => `แถว ${e.line}: ${esc(e.msg)}`).join('<br>')}</div>` : ''}
+        ${r.preview.length ? `<div class="tablewrap" style="max-height:240px;overflow:auto;margin-top:8px"><table><tr><th>ชื่อลูกค้า</th><th>ที่อยู่</th><th>เบอร์โทร</th></tr>
+          ${r.preview.map((c) => `<tr><td>${esc(c.name)}</td><td>${esc(c.address)}</td><td>${esc(c.phone)}</td></tr>`).join('')}</table></div>` : ''}</div>`;
+      go.textContent = n ? `ยืนยันนำเข้า ${n} ราย` : 'นำเข้า'; go.disabled = !n;
+    } catch (e) { out.innerHTML = ''; $('.err', form).textContent = e.message; }
+  };
+  form.elements.file.onchange = () => {
+    const f = form.elements.file.files[0]; b64 = '';
+    if (!f) return check();
+    const rd = new FileReader();
+    rd.onload = () => { b64 = String(rd.result).split(',')[1] || ''; check(); };
+    rd.readAsDataURL(f);
+  };
+  form.elements.mode.onchange = check;
+  onSubmit(form, async (v) => {
+    const r = await api('/api/customers/import', { body: { file: b64, mode: v.mode, commit: true } });
+    d.close(); toast(`นำเข้าแล้ว: เพิ่มใหม่ ${r.add} · อัปเดต ${r.update}`); customersPage();
   });
 }
 
