@@ -132,7 +132,7 @@ function shipmentInput(body) {
 
 // ---------- app ----------
 const app = express();
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '8mb' })); // ใหญ่พอสำหรับไฟล์ Excel ที่นำเข้า
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.use('/api', async (req, res, next) => {
@@ -357,6 +357,147 @@ app.post('/api/shipments/:id/delete', admin, async (req, res) => {
     req.user.id, now(), reason, Number(req.params.id));
   if (!r.changes) fail(404, 'ไม่พบรายการ');
   res.json({ ok: true });
+});
+
+// ---------- import from Excel ----------
+// หัวคอลัมน์ที่รู้จัก (เทียบแบบตัดช่องว่าง/ตัวพิมพ์เล็ก) — ชื่อยาวก่อน เพื่อให้ "วันที่ตัดบิล" ไม่ไปจับ "วันที่"
+const IMPORT_COLS = {
+  receipt_no: ['เลขที่ใบเสร็จ', 'เลขที่ใบเสร็จรับเงิน', 'เลขใบเสร็จ', 'ใบเสร็จเลขที่', 'ใบเสร็จ', 'receiptno', 'receipt'],
+  bill_date: ['วันที่ตัดบิล', 'วันตัดบิล', 'ตัดบิล', 'วันที่บิล', 'วันที่ใบเสร็จ', 'billdate'],
+  customer: ['ชื่อลูกค้า', 'ลูกค้า', 'ชื่อบริษัท', 'customer'],
+  sent_date: ['วันที่ส่ง', 'วันส่ง', 'วันที่จัดส่ง', 'sentdate'],
+  destination: ['ส่งไปที่', 'ที่อยู่จัดส่ง', 'ที่อยู่', 'ผู้รับ', 'สถานที่ส่ง', 'address'],
+  carrier: ['ส่งทาง', 'ช่องทางส่ง', 'บริษัทขนส่ง', 'ขนส่ง', 'carrier'],
+  tracking_no: ['เลขพัสดุ', 'เลขที่พัสดุ', 'เลขแทรค', 'เลขติดตาม', 'trackingno', 'tracking'],
+  status: ['สถานะ', 'status'],
+  note: ['หมายเหตุ', 'note', 'remark'],
+};
+const normHead = (s) => String(s ?? '').toLowerCase().replace(/[\s._\-/()*:]/g, '');
+function mapHeader(row) {
+  const map = {};
+  const aliases = Object.entries(IMPORT_COLS).flatMap(([k, list]) => list.map((a) => [k, normHead(a)])).sort((a, b) => b[1].length - a[1].length);
+  row.forEach((cell, i) => {
+    const h = normHead(cell);
+    if (!h) return;
+    const hit = aliases.find(([k, a]) => !(k in map) && h === a) || aliases.find(([k, a]) => !(k in map) && h.includes(a));
+    if (hit) map[hit[0]] = i;
+  });
+  return map;
+}
+// วันที่จาก Excel: เลขวันที่ของ Excel, dd/mm/yyyy (พ.ศ. หรือ ค.ศ., ปี 2 หลักถือเป็น พ.ศ.), yyyy-mm-dd
+function parseDate(v) {
+  if (v === '' || v == null) return '';
+  let y, m, d;
+  if (typeof v === 'number') {
+    const p = XLSX.SSF.parse_date_code(v);
+    if (!p) return null;
+    ({ y, m, d } = p);
+  } else {
+    const s = String(v).trim();
+    let r;
+    if ((r = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/.exec(s))) [, y, m, d] = r.map(Number);
+    else if ((r = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})$/.exec(s))) { [, d, m, y] = r.map(Number); if (y < 100) y += 2500; }
+    else return null;
+  }
+  if (y > 2400) y -= 543;
+  const iso = `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  const t = new Date(iso + 'T00:00:00Z');
+  return !isNaN(t) && t.getUTCDate() === d && y >= 2000 && y <= 2100 ? iso : null;
+}
+const STATUS_FROM_TH = Object.fromEntries(Object.entries(STATUS_TH).flatMap(([k, t]) => [[normHead(t), k], [k, k]]));
+STATUS_FROM_TH[normHead('ได้รับแล้ว')] = 'received';
+
+app.get('/api/import-template.xlsx', auth, (req, res) => {
+  const ws = XLSX.utils.aoa_to_sheet([
+    ['เลขที่ใบเสร็จ', 'วันที่ตัดบิล', 'ชื่อลูกค้า', 'วันที่ส่ง', 'ส่งไปที่', 'ส่งทาง', 'เลขพัสดุ', 'หมายเหตุ'],
+    ['RC0001', '01/11/2569', 'บริษัท ตัวอย่าง จำกัด', '05/11/2569', '99/1 ถ.สุขุมวิท กรุงเทพฯ 10110', 'ไปรษณีย์ไทย (EMS)', 'EF123456789TH', ''],
+    ['RC0002', '01/11/2569', 'ร้านตัวอย่าง', '', '', '', '', 'ยังไม่ส่ง เว้นวันที่ส่งไว้'],
+  ]);
+  ws['!cols'] = [16, 14, 30, 14, 40, 20, 18, 26].map((wch) => ({ wch }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'ใบเสร็จ');
+  res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.set('Content-Disposition', 'attachment; filename="receipt-import-template.xlsx"');
+  res.send(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+});
+
+// body: { file: base64, mode: 'skip' | 'update', commit: bool }
+// commit = false → ตรวจอย่างเดียว (แสดงตัวอย่างก่อนยืนยัน), true → บันทึกจริง
+app.post('/api/import', auth, async (req, res) => {
+  let wb;
+  try { wb = XLSX.read(Buffer.from(String(req.body.file || ''), 'base64'), { type: 'buffer' }); }
+  catch { fail(400, 'อ่านไฟล์ไม่ได้ — ต้องเป็นไฟล์ Excel (.xlsx / .xls) หรือ .csv'); }
+  const update = req.body.mode === 'update';
+  // หาแผ่นงานและแถวหัวคอลัมน์ (ใน 15 แถวแรก) ที่ตรงกับชื่อคอลัมน์มากที่สุด — ข้ามแถวชื่อรายงานด้านบน
+  let best = null;
+  for (const name of wb.SheetNames) {
+    const g = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' });
+    g.slice(0, 15).forEach((row, i) => {
+      const m = mapHeader(row), score = Object.keys(m).length;
+      if ('receipt_no' in m && (!best || score > best.score)) best = { name, grid: g, headIdx: i, score };
+    });
+  }
+  if (!best) fail(400, 'ไม่พบหัวคอลัมน์ "เลขที่ใบเสร็จ" ในไฟล์ (ดูตัวอย่างจากไฟล์แม่แบบ)');
+  const { name: sheetName, grid, headIdx } = best;
+  const map = mapHeader(grid[headIdx]);
+  const missing = ['bill_date', 'customer'].filter((k) => !(k in map));
+  if (missing.length && !update) fail(400, `ไม่พบคอลัมน์ ${missing.map((k) => `"${IMPORT_COLS[k][0]}"`).join(', ')} (ถ้าต้องการเติมข้อมูลให้รายการเดิม เลือก "อัปเดตรายการเดิม")`);
+
+  const existing = new Map((await db.all('SELECT * FROM shipments WHERE deleted = 0 ORDER BY id')).map((r) => [r.receipt_no, r]));
+  const seen = new Set(), items = [], errors = [];
+  let skipped = 0;
+  for (let i = headIdx + 1; i < grid.length; i++) {
+    const row = grid[i], line = i + 1;
+    const get = (k) => (k in map ? row[map[k]] : '');
+    const receipt_no = str(get('receipt_no'), 60);
+    if (!receipt_no) { if (Object.values(map).some((c) => String(row[c] ?? '').trim())) errors.push({ line, msg: 'ไม่มีเลขที่ใบเสร็จ' }); continue; }
+    if (seen.has(receipt_no)) { errors.push({ line, receipt_no, msg: 'เลขที่ใบเสร็จซ้ำกับแถวก่อนหน้าในไฟล์' }); continue; }
+    seen.add(receipt_no);
+    const v = { receipt_no };
+    try {
+      for (const k of ['bill_date', 'sent_date']) {
+        const dt = parseDate(get(k));
+        if (dt === null) fail(400, `${k === 'bill_date' ? 'วันที่ตัดบิล' : 'วันที่ส่ง'} "${get(k)}" อ่านไม่ได้ (ใช้ วว/ดด/ปปปป)`);
+        if (dt) v[k] = dt;
+      }
+      for (const k of ['customer', 'destination', 'carrier', 'tracking_no', 'note']) { const s = str(get(k), 500); if (s) v[k] = s; }
+      const st = normHead(get('status'));
+      if (st) { if (!STATUS_FROM_TH[st]) fail(400, `สถานะ "${get('status')}" ไม่รู้จัก`); v.status = STATUS_FROM_TH[st]; }
+      const old = existing.get(receipt_no);
+      if (old && !update) { skipped++; continue; }
+      if (old) {
+        const s = shipmentInput({ ...old, ...v, status: v.status || old.status });
+        const before = Object.fromEntries(EDIT_FIELDS.filter((k) => old[k] !== s[k]).map((k) => [k, old[k]]));
+        if (!Object.keys(before).length) { skipped++; continue; }
+        items.push({ action: 'update', id: old.id, s, before, line });
+      } else {
+        if (update && (!v.bill_date || !v.customer)) fail(400, 'ไม่พบเลขที่ใบเสร็จนี้ในระบบ (และไม่มีวันที่ตัดบิล/ชื่อลูกค้าพอจะเพิ่มเป็นรายการใหม่)');
+        items.push({ action: 'create', s: shipmentInput(v), line });
+      }
+    } catch (e) {
+      if (!(e instanceof HttpError)) throw e;
+      errors.push({ line, receipt_no, msg: e.message });
+    }
+  }
+  const summary = {
+    sheet: sheetName, create: items.filter((x) => x.action === 'create').length, update: items.filter((x) => x.action === 'update').length,
+    skipped, errors: errors.slice(0, 200), errorCount: errors.length,
+    preview: items.slice(0, 50).map(({ action, s, line }) => ({ action, line, ...s })),
+  };
+  if (!req.body.commit) return res.json(summary);
+  if (!items.length) fail(400, 'ไม่มีรายการให้นำเข้า');
+  const t = now(), stmts = [];
+  for (const { action, id, s, before } of items) {
+    if (action === 'create') stmts.push({ sql: `INSERT INTO shipments (receipt_no, bill_date, customer, sent_date, destination, carrier, tracking_no, status, note, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args: [s.receipt_no, s.bill_date, s.customer, s.sent_date, s.destination, s.carrier, s.tracking_no, s.status, s.note, req.user.id, t] });
+    else stmts.push(
+      { sql: 'INSERT INTO shipment_edits (shipment_id, edited_by, edited_at, before) VALUES (?, ?, ?, ?)', args: [id, req.user.id, t, JSON.stringify({ ...before, via: 'นำเข้า Excel' })] },
+      { sql: `UPDATE shipments SET receipt_no = ?, bill_date = ?, customer = ?, sent_date = ?, destination = ?, carrier = ?,
+                tracking_no = ?, status = ?, note = ?, updated_by = ?, updated_at = ? WHERE id = ?`,
+        args: [s.receipt_no, s.bill_date, s.customer, s.sent_date, s.destination, s.carrier, s.tracking_no, s.status, s.note, req.user.id, t, id] });
+  }
+  await client.batch(stmts, 'write'); // ทั้งไฟล์สำเร็จหรือไม่บันทึกเลย
+  res.json({ ...summary, committed: true });
 });
 
 // ---------- export ----------

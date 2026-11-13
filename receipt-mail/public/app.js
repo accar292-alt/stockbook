@@ -220,7 +220,8 @@ function listPage() {
         <label>ถึง<input id="fto" type="date" value="${F.to}"></label>
         <button class="btn ghost" id="fclear">ล้าง</button>
         <button class="btn ghost" id="fprint">พิมพ์</button>
-        <button class="btn ghost" id="fxlsx">Excel</button>
+        <button class="btn ghost" id="fxlsx">ส่งออก Excel</button>
+        <button class="btn" id="fimport">นำเข้า Excel</button>
       </div>
       <div class="selbar" id="selbar" hidden><b id="selCount"></b><button class="btn sm" id="markSent">บันทึกว่าส่งแล้ว…</button>
         <button class="btn ghost sm" id="selNone">ยกเลิกการเลือก</button></div>
@@ -236,6 +237,7 @@ function listPage() {
   $('#fxlsx').onclick = () => (location.href = '/api/export.xlsx?' + new URLSearchParams(F));
   $('#selNone').onclick = () => { $$('.pick').forEach((c) => (c.checked = false)); selChanged(); };
   $('#markSent').onclick = markSentDialog;
+  $('#fimport').onclick = importDialog;
   load();
 }
 
@@ -305,7 +307,7 @@ async function editDialog(id) {
   try { r = await api(`/api/shipments/${id}`); } catch (e) { return toast(e.message, true); }
   const fmt = (k, v) => (k.endsWith('_date') ? thDate(v) : k === 'status' ? S.statuses[v] : v) || '(ว่าง)';
   const hist = r.edits.map((e) => `<div>${thTime(e.edited_at)} · ${esc(e.name)} แก้: ${Object.entries(JSON.parse(e.before))
-    .map(([k, v]) => `${FIELD_TH[k] || k} เดิม "${esc(fmt(k, v))}"`).join(', ')}</div>`).join('');
+    .map(([k, v]) => (k === 'via' ? `(${esc(v)})` : `${FIELD_TH[k] || k} เดิม "${esc(fmt(k, v))}"`)).join(', ')}</div>`).join('');
   const d = dialog(`<h3>ใบเสร็จ ${esc(r.receipt_no)} ${tag(r.status)}</h3><form>${shipmentFields(r)}
     <p class="mute">บันทึกโดย ${esc(r.created_name)} ${thTime(r.created_at)}${r.updated_at ? ` · แก้ล่าสุด ${esc(r.updated_name)} ${thTime(r.updated_at)}` : ''}</p>
     ${hist ? `<div class="hist"><b>ประวัติการแก้ไข</b>${hist}</div>` : ''}
@@ -325,6 +327,60 @@ async function editDialog(id) {
     try { await api(`/api/shipments/${id}/delete`, { body: { reason } }); d.close(); toast('ลบรายการแล้ว'); load(); }
     catch (e) { toast(e.message, true); }
   };
+}
+
+// ---------- import ----------
+function importDialog() {
+  const d = dialog(`<h3>นำเข้าจาก Excel</h3>
+    <p class="mute">ไฟล์ต้องมีแถวหัวคอลัมน์ เช่น เลขที่ใบเสร็จ, วันที่ตัดบิล, ชื่อลูกค้า, วันที่ส่ง, ส่งไปที่, ส่งทาง, เลขพัสดุ, หมายเหตุ
+      (ลำดับคอลัมน์ไม่สำคัญ วันที่ใช้ วว/ดด/ปปปป ได้ทั้ง พ.ศ. และ ค.ศ.) · <a href="/api/import-template.xlsx">ดาวน์โหลดไฟล์แม่แบบ</a></p>
+    <form>
+      <label>ไฟล์ Excel (.xlsx, .xls, .csv)<input type="file" name="file" accept=".xlsx,.xls,.csv" required></label>
+      <label>ถ้าเลขที่ใบเสร็จมีอยู่แล้วในระบบ<select name="mode">
+        <option value="skip">ข้าม (เพิ่มเฉพาะใบเสร็จใหม่)</option>
+        <option value="update">อัปเดตรายการเดิม ด้วยช่องที่กรอกในไฟล์ (เช่น เติมวันที่ส่ง/เลขพัสดุ)</option></select></label>
+      <div id="impResult"></div>
+      <div class="err"></div>
+      <div class="actions"><button type="button" class="btn ghost" data-close>ยกเลิก</button>
+        <button class="btn" type="submit" id="impGo" disabled>นำเข้า</button></div>
+    </form>`, true);
+  const form = $('form', d), out = $('#impResult', d), go = $('#impGo', d);
+  let b64 = '';
+  const check = async () => {
+    go.disabled = true; $('.err', form).textContent = ''; out.innerHTML = b64 ? '<p class="mute">กำลังตรวจไฟล์…</p>' : '';
+    if (!b64) return;
+    try {
+      const r = await api('/api/import', { body: { file: b64, mode: form.elements.mode.value } });
+      const n = r.create + r.update;
+      out.innerHTML = `<div class="card" style="margin:0">
+        <b>ตรวจแล้ว (แผ่นงาน "${esc(r.sheet)}")</b>: เพิ่มใหม่ <b>${r.create}</b> · อัปเดต <b>${r.update}</b> · ข้าม ${r.skipped}
+        ${r.errorCount ? ` · <span style="color:var(--bad)">มีปัญหา ${r.errorCount} แถว (จะไม่ถูกนำเข้า)</span>` : ''}
+        ${r.errors.length ? `<div class="warn" style="margin-top:8px;max-height:140px;overflow:auto">${r.errors.map((e) =>
+          `แถว ${e.line}${e.receipt_no ? ` (${esc(e.receipt_no)})` : ''}: ${esc(e.msg)}`).join('<br>')}</div>` : ''}
+        ${r.preview.length ? `<div class="tablewrap" style="max-height:260px;overflow:auto;margin-top:8px"><table>
+          <tr><th>แถว</th><th></th><th>เลขที่ใบเสร็จ</th><th>ตัดบิล</th><th>ลูกค้า</th><th>วันที่ส่ง</th><th>เลขพัสดุ</th></tr>
+          ${r.preview.map((p) => `<tr><td>${p.line}</td><td>${p.action === 'create' ? '<span class="tag received">ใหม่</span>' : '<span class="tag sent">อัปเดต</span>'}</td>
+            <td>${esc(p.receipt_no)}</td><td class="nowrap">${thDate(p.bill_date)}</td><td>${esc(p.customer)}</td>
+            <td class="nowrap">${thDate(p.sent_date) || '-'}</td><td class="track">${esc(p.tracking_no)}</td></tr>`).join('')}
+        </table></div>${n > r.preview.length ? `<p class="mute">แสดง ${r.preview.length} จาก ${n} รายการ</p>` : ''}` : ''}</div>`;
+      go.textContent = n ? `ยืนยันนำเข้า ${n} รายการ` : 'นำเข้า';
+      go.disabled = !n;
+    } catch (e) { out.innerHTML = ''; $('.err', form).textContent = e.message; }
+  };
+  form.elements.file.onchange = () => {
+    const f = form.elements.file.files[0];
+    b64 = '';
+    if (!f) return check();
+    if (f.size > 5 * 1024 * 1024) { $('.err', form).textContent = 'ไฟล์ใหญ่เกิน 5 MB'; return; }
+    const rd = new FileReader();
+    rd.onload = () => { b64 = String(rd.result).split(',')[1] || ''; check(); };
+    rd.readAsDataURL(f);
+  };
+  form.elements.mode.onchange = check;
+  onSubmit(form, async (v) => {
+    const r = await api('/api/import', { body: { file: b64, mode: v.mode, commit: true } });
+    d.close(); toast(`นำเข้าแล้ว: เพิ่มใหม่ ${r.create} · อัปเดต ${r.update}`); loadCustomers(true); load();
+  });
 }
 
 // ---------- admin ----------
