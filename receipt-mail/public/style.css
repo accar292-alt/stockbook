@@ -82,13 +82,11 @@ dialog h3 { margin: 0 0 12px; }
 @media screen and (max-width: 700px) {
   table.ships thead { display: none; }
   table.ships, table.ships tbody { display: block; }
-  table.ships tr { display: grid; grid-template-columns: auto 1fr auto; gap: 2px 10px; padding: 10px 4px; border-bottom: 1px solid var(--line); }
+  table.ships tr { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 10px 4px; border-bottom: 1px solid var(--line); }
   table.ships td { display: block; border: 0; padding: 0; min-width: 0; }
-  table.ships td.pickcell { grid-row: 1 / span 2; padding-top: 2px; }
-  table.ships td.rno { grid-column: 2; }
-  table.ships td.st { grid-column: 3; grid-row: 1; text-align: right; }
-  table.ships td.cust { grid-column: 2 / 4; font-weight: 600; }
-  table.ships td[data-l] { grid-column: 2 / 4; font-size: .9em; white-space: normal; max-width: none; }
+  table.ships td.st { grid-column: 2; grid-row: 1; text-align: right; }
+  table.ships td.cust { grid-column: 1; grid-row: 1; }
+  table.ships td[data-l] { grid-column: 1 / 3; font-size: .9em; white-space: normal; max-width: none; }
   table.ships td[data-l]::before { content: attr(data-l) ": "; color: var(--mute); }
   .stat { min-width: 0; flex: 1 1 calc(33% - 12px); padding: 8px 12px; }
   .bar .grow { min-width: 100%; }
@@ -99,4 +97,24 @@ dialog h3 { margin: 0 0 12px; }
   nav { order: 3; flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; }
   nav button { white-space: nowrap; padding: 6px 10px; }
   .stat b { font-size: 1.2em; }
+}
+/* ซอง: กล่องแบ่งส่วนในฟอร์ม และรายการใบเสร็จ */
+fieldset.box { border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px 14px; margin: 0 0 14px; min-width: 0; }
+fieldset.box legend { font-weight: 600; padding: 0 6px; }
+table.rtable { width: auto; min-width: min(100%, 460px); }
+table.rtable th, table.rtable td { border: 0; padding: 3px 6px 3px 0; background: none; }
+table.rtable td.rnum { color: var(--mute); font-size: .85em; text-align: right; padding-top: 10px; width: 2em; }
+table.rtable input.r-no { min-width: 150px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; align-items: center; }
+.chip { font-family: ui-monospace, Consolas, monospace; font-size: .8em; padding: 0 6px; border-radius: 4px; background: var(--th, #eef2f5); border: 1px solid var(--line); }
+.chip.hit { background: #fff1a8; border-color: #e0c341; }
+.count { font-size: .8em; color: var(--mute); white-space: nowrap; }
+.stat small { font-size: .55em; font-weight: 400; color: var(--mute); }
+.stat .mute { display: block; }
+#slip { display: none; }
+@media print {
+  body.printing-slip > *:not(#slip) { display: none !important; }
+  body.printing-slip #slip { display: block; }
+  #slip table { width: 100%; border-collapse: collapse; }
+  #slip th, #slip td { border: 1px solid #999; padding: 4px 8px; }
 }
