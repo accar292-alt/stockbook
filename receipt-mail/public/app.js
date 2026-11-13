@@ -14,27 +14,6 @@ function sumAmount(list) {
   const xs = list.map((r) => numOrNull(r.amount)).filter((n) => n != null);
   return xs.length ? Math.round(xs.reduce((a, b) => a + Math.round(b * 100), 0)) / 100 : null;
 }
-// จำนวนเงินเป็นตัวหนังสือ เช่น 1,021.50 → หนึ่งพันยี่สิบเอ็ดบาทห้าสิบสตางค์
-function bahtText(n) {
-  const d = ['', 'หนึ่ง', 'สอง', 'สาม', 'สี่', 'ห้า', 'หก', 'เจ็ด', 'แปด', 'เก้า'], u = ['', 'สิบ', 'ร้อย', 'พัน', 'หมื่น', 'แสน'];
-  const read = (t, higher = false) => {
-    if (t.length > 6) return read(t.slice(0, -6)) + 'ล้าน' + read(t.slice(-6), true);
-    let out = '';
-    for (let i = 0; i < t.length; i++) {
-      const k = +t[i], pos = t.length - i - 1;
-      if (!k) continue;
-      if (pos === 0 && k === 1 && (higher || +t.slice(0, -1) > 0)) out += 'เอ็ด';
-      else if (pos === 1 && k === 2) out += 'ยี่';
-      else if (!(pos === 1 && k === 1)) out += d[k];
-      out += u[pos];
-    }
-    return out;
-  };
-  const [b, st] = Math.abs(n).toFixed(2).split('.');
-  const bi = b.replace(/^0+/, '');
-  return (bi ? read(bi) + 'บาท' : '') + (+st ? read(String(+st)) + 'สตางค์' : bi ? 'ถ้วน' : 'ศูนย์บาทถ้วน');
-}
-
 let S = { user: null, orgName: '', carriers: [], statuses: {} };
 const isAdmin = () => S.user?.role === 'admin';
 
@@ -528,7 +507,7 @@ function slipHtml(p, opt) {
   const sorted = opt.sort
     ? [...p.receipts].sort((a, b) => a.bill_date.localeCompare(b.bill_date) || a.receipt_no.localeCompare(b.receipt_no, 'th', { numeric: true }))
     : p.receipts;
-  const total = sumAmount(p.receipts), showAmt = opt.amount && total != null;
+  const showAmt = opt.amount && p.receipts.some((r) => r.amount != null); // แสดงยอดรายใบ ไม่แสดงยอดรวม
   const showCust = p.receipts.some((r) => r.customer && r.customer !== p.customer); // ลูกค้าคนละรายกับผู้รับ
   const longDate = (d) => (d ? new Date(d + 'T00:00:00').toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' }) : '');
   return `<div class="slip-page">
@@ -537,12 +516,11 @@ function slipHtml(p, opt) {
     <h1 class="slip-title">รายการใบเสร็จรับเงินที่จัดส่ง</h1>
     <table class="slip-info"><tr><th>เรียน</th><td><b>${esc(p.customer)}</b>${p.destination ? `<br>${nl(p.destination)}` : ''}</td></tr>
       ${p.carrier || p.tracking_no ? `<tr><th>จัดส่งทาง</th><td>${esc(p.carrier) || '-'}${p.tracking_no ? ` &nbsp; เลขพัสดุ <b>${esc(p.tracking_no)}</b>` : ''}</td></tr>` : ''}</table>
-    <p>ขอนำส่งใบเสร็จรับเงิน จำนวน <b>${p.receipts.length}</b> ฉบับ${showAmt ? ` รวมเป็นเงิน <b>${money(total)}</b> บาท` : ''} ตามรายการดังต่อไปนี้</p>
+    <p>ขอนำส่งใบเสร็จรับเงิน จำนวน <b>${p.receipts.length}</b> ฉบับ ตามรายการดังต่อไปนี้</p>
     <table class="slip-list"><thead><tr><th class="c">ลำดับ</th><th>เลขที่ใบเสร็จ</th><th>วันที่</th>${showCust ? '<th>ชื่อลูกค้า</th>' : ''}${opt.detail ? '<th>รายละเอียดสินค้า</th>' : ''}${showAmt ? '<th class="num">จำนวนเงิน (บาท)</th>' : ''}<th class="c">ตรวจรับ</th></tr></thead>
       <tbody>${sorted.map((r, i) => `<tr><td class="c">${i + 1}</td><td class="nowrap">${esc(r.receipt_no)}</td><td class="nowrap">${thDate(r.bill_date)}</td>
         ${showCust ? `<td>${esc(r.customer || p.customer)}</td>` : ''}${opt.detail ? `<td>${esc(r.detail)}</td>` : ''}${showAmt ? `<td class="num">${r.amount != null ? money(r.amount) : '-'}</td>` : ''}<td class="c">☐</td></tr>`).join('')}</tbody>
-      <tfoot><tr><td colspan="${3 + (showCust ? 1 : 0) + (opt.detail ? 1 : 0)}">รวมทั้งสิ้น <b>${p.receipts.length}</b> ฉบับ${showAmt ? `<div class="slip-words">(${bahtText(total)})</div>` : ''}</td>
-        ${showAmt ? `<td class="num"><b>${money(total)}</b></td>` : ''}<td></td></tr></tfoot></table>
+      <tfoot><tr><td colspan="${4 + (showCust ? 1 : 0) + (opt.detail ? 1 : 0) + (showAmt ? 1 : 0)}">รวมทั้งสิ้น <b>${p.receipts.length}</b> ฉบับ</td></tr></tfoot></table>
     ${p.note && opt.note ? `<p class="slip-small">หมายเหตุ: ${esc(p.note)}</p>` : ''}
     <p>กรุณาตรวจสอบเอกสาร หากไม่ครบถ้วนหรือมีข้อสงสัย กรุณาติดต่อกลับ${opt.contact ? ` ${esc(opt.contact)}` : ''}</p>
     ${opt.sign ? `<div class="slip-sign"><div>ลงชื่อ ..................................................<br>ผู้จัดส่ง<br>วันที่ ........./........./.........</div>
@@ -556,7 +534,7 @@ function slipDialog(parcels) {
   const d = dialog(`<h3>พิมพ์ใบรายการใบเสร็จ ${parcels.length} ซอง</h3>
     <p class="mute">กระดาษ A4 · 1 ซองได้ 1 ชุด ถ้าใบเสร็จเยอะจะต่อขึ้นหน้าถัดไปเอง</p>
     <div class="grid">
-      <label class="checkrow"><input type="checkbox" id="slAmt" checked> แสดงยอดเงินและยอดรวม</label>
+      <label class="checkrow"><input type="checkbox" id="slAmt" checked> แสดงยอดเงินของแต่ละใบ</label>
       <label class="checkrow"><input type="checkbox" id="slDetail" checked> แสดงรายละเอียดสินค้า</label>
       <label class="checkrow"><input type="checkbox" id="slSign" checked> ช่องลงชื่อผู้จัดส่ง / ผู้รับ</label>
       <label class="checkrow"><input type="checkbox" id="slSort" checked> เรียงตามวันที่และเลขที่ใบเสร็จ</label>

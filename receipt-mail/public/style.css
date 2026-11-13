@@ -161,7 +161,6 @@ table.rtable input.r-amt { width: 120px; text-align: right; font-variant-numeric
 table.rtable th.num { text-align: right; }
 .slip-list .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .slip-list tfoot td { font-weight: 400; }
-.slip-words { font-size: 11.5pt; }
 .slip-list .c { width: 9%; }
 .slip-list th, .slip-list td { font-size: 12.5pt; }
 .slip-list th:nth-child(2), .slip-list td:nth-child(2) { width: 15%; }
