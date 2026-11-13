@@ -288,6 +288,8 @@ function listPage() {
         <button class="btn ghost" id="fxlsx">ส่งออก Excel</button>
         <button class="btn" id="fimport">นำเข้า Excel</button>
       </div>
+      <div class="selbar" id="selbar" hidden><b id="selCount"></b><button class="btn sm" id="selEnv">พิมพ์หน้าซอง</button>
+        <button class="btn ghost sm" id="selNone">ยกเลิกการเลือก</button></div>
       <div class="print-head"><b>${esc(S.orgName)}</b> — รายการซองที่ส่ง <span id="printNote"></span></div>
       <div class="tablewrap" id="tbl"><p class="mute">กำลังโหลด…</p></div>
     </div>`;
@@ -299,6 +301,8 @@ function listPage() {
   $('#fprint').onclick = () => window.print();
   $('#fxlsx').onclick = () => (location.href = '/api/export.xlsx?' + new URLSearchParams(F));
   $('#fimport').onclick = importDialog;
+  $('#selNone').onclick = () => { $$('.pick').forEach((c) => (c.checked = false)); selChanged(); };
+  $('#selEnv').onclick = () => envelopeDialog(rows.filter((p) => picked().includes(p.id)));
   load();
 }
 
@@ -331,10 +335,11 @@ async function load() {
   const by = F.by === 'sent' ? 'วันที่ส่ง' : 'วันที่ตัดบิล';
   $('#printNote').textContent = [F.from || F.to ? `${by} ${thDate(F.from) || '…'} – ${thDate(F.to) || '…'}` : '',
     F.status ? `สถานะ: ${S.statuses[F.status]}` : '', F.q ? `ค้นหา: ${F.q}` : '', `(${rows.length} ซอง)`].filter(Boolean).join(' · ');
-  if (!rows.length) { $('#tbl').innerHTML = '<p class="mute">ไม่พบรายการ</p>'; return; }
+  if (!rows.length) { $('#tbl').innerHTML = '<p class="mute">ไม่พบรายการ</p>'; selChanged(); return; }
   $('#tbl').innerHTML = `<table class="ships"><thead><tr>
-      <th>ลูกค้า / ใบเสร็จในซอง</th><th>ตัดบิล</th><th>วันที่ส่ง</th><th>ส่งไปที่</th><th>ส่งทาง</th><th>เลขพัสดุ</th><th>สถานะ</th></tr></thead>
+      <th class="noprint pickcell"><input type="checkbox" id="pickAll" title="เลือกทั้งหมด" aria-label="เลือกทั้งหมด"></th><th>ลูกค้า / ใบเสร็จในซอง</th><th>ตัดบิล</th><th>วันที่ส่ง</th><th>ส่งไปที่</th><th>ส่งทาง</th><th>เลขพัสดุ</th><th>สถานะ</th></tr></thead>
     <tbody>${rows.map((p) => `<tr class="click ${p.status}" data-id="${p.id}">
+      <td class="noprint pickcell"><input type="checkbox" class="pick" value="${p.id}" aria-label="เลือกซอง ${esc(p.customer)}"></td>
       <td class="cust"><b>${esc(p.customer)}</b> <span class="count">${p.receipts.length} ใบ</span>${receiptChips(p)}${p.note ? `<div class="mute">${esc(p.note)}</div>` : ''}</td>
       <td class="nowrap" data-l="ตัดบิล">${billRange(p)}</td>
       <td class="nowrap" data-l="วันที่ส่ง">${thDate(p.sent_date) || '<span class="mute">-</span>'}</td>
@@ -343,9 +348,18 @@ async function load() {
       <td class="track nowrap" data-l="เลขพัสดุ">${trackHtml(p)}</td><td class="st">${tag(p.status)}</td></tr>`).join('')}</tbody></table>
     ${rows.length >= 300 ? '<p class="mute">แสดง 300 ซองล่าสุด — ใช้ตัวกรองหรือส่งออก Excel เพื่อดูทั้งหมด</p>' : ''}`;
   $$('#tbl tbody tr').forEach((tr) => tr.addEventListener('click', (e) => {
-    if (e.target.closest('a, button')) return;
+    if (e.target.closest('a, button, input, .pickcell')) return;
     editDialog(Number(tr.dataset.id));
   }));
+  $('#pickAll').onchange = (e) => { $$('.pick').forEach((c) => (c.checked = e.target.checked)); selChanged(); };
+  $$('.pick').forEach((c) => (c.onchange = selChanged));
+  selChanged();
+}
+const picked = () => $$('.pick').filter((c) => c.checked).map((c) => Number(c.value));
+function selChanged() {
+  const n = picked().length;
+  $('#selbar').hidden = !n;
+  $('#selCount').textContent = `เลือก ${n} ซอง`;
 }
 
 const FIELD_TH = { customer: 'ลูกค้า', sent_date: 'วันที่ส่ง', destination: 'ส่งไปที่', carrier: 'ส่งทาง', tracking_no: 'เลขพัสดุ',
@@ -384,12 +398,14 @@ async function editDialog(id) {
     ${hist ? `<div class="hist"><b>ประวัติการแก้ไข</b>${hist}</div>` : ''}
     <div class="err"></div><div class="actions">
       ${isAdmin() ? '<button type="button" class="btn danger left" id="del">ลบซองนี้</button>' : ''}
+      <button type="button" class="btn ghost" id="envBtn">พิมพ์หน้าซอง</button>
       <button type="button" class="btn ghost" id="slipBtn">พิมพ์ใบแนบซอง</button>
       <button type="button" class="btn ghost" data-close>ปิด</button><button class="btn" type="submit">บันทึกการแก้ไข</button></div></form>`, true);
   const form = $('form', d);
   form.elements.status.value = p.status;
   wireParcelForm(form, id);
   $('#slipBtn', d).onclick = () => printSlip(p);
+  $('#envBtn', d).onclick = () => envelopeDialog([p]);
   onSubmit(form, async (v) => {
     const res = await api(`/api/parcels/${id}`, { method: 'PUT', body: parcelBody(form, v) });
     d.close(); toast(res.unchanged ? 'ไม่มีการเปลี่ยนแปลง' : 'บันทึกการแก้ไขแล้ว'); loadCustomers(true); load();
@@ -409,6 +425,108 @@ async function editDialog(id) {
       try { await api(`/api/parcels/${id}/delete`, { body: { reason } }); d.close(); toast('ลบซองแล้ว'); load(); }
       catch (e) { toast(e.message, true); }
     };
+  };
+}
+
+// ---------- หน้าซอง ----------
+// แยกรหัสไปรษณีย์ 5 หลักท้ายที่อยู่ออกมาพิมพ์เป็นช่อง
+function splitPostcode(text) {
+  const m = /^([\s\S]*?)[\s,]*(\d{5})\s*$/.exec(text || '');
+  return m ? { address: m[1].trim(), postcode: m[2] } : { address: (text || '').trim(), postcode: '' };
+}
+function envelopeHtml(p, opt) {
+  const e = S.envelope;
+  const { address, postcode } = splitPostcode(p.destination);
+  // ถ้าที่อยู่มีชื่อลูกค้าอยู่แล้ว ไม่พิมพ์ชื่อซ้ำ
+  const showName = !address.includes(p.customer);
+  const nl = (t) => esc(t).replace(/\n/g, '<br>');
+  const refs = p.receipts.map((r) => r.receipt_no);
+  return `<div class="env-page" style="width:${e.env_w}in;height:${e.env_h}in">
+    <div class="env-inner" style="transform:translate(${e.env_dx}mm,${e.env_dy}mm)">
+      <div class="env-from"><div class="env-label">ผู้ส่ง</div><b>${esc(e.env_sender_name || S.orgName)}</b><br>${nl(e.env_sender_address)}</div>
+      <div class="env-to"><div class="env-label">กรุณาส่ง</div>
+        ${showName ? `<div class="env-name">${esc(p.customer)}</div>` : ''}
+        <div class="env-addr">${nl(address) || (showName ? '' : esc(p.customer))}</div>
+        ${postcode ? `<div class="env-zip">${[...postcode].map((c) => `<span>${c}</span>`).join('')}</div>` : ''}
+      </div>
+      ${opt.refs ? `<div class="env-ref">ใบเสร็จ ${refs.length} ใบ: ${esc(refs.slice(0, 15).join(', '))}${refs.length > 15 ? ` และอีก ${refs.length - 15} ใบ` : ''}</div>` : ''}
+    </div></div>`;
+}
+
+function envelopeDialog(parcels) {
+  const e = S.envelope;
+  const noAddr = parcels.filter((p) => !p.destination.trim());
+  const d = dialog(`<h3>พิมพ์หน้าซอง ${parcels.length} ซอง</h3>
+    <p class="mute">ขนาดซอง ${e.env_w} × ${e.env_h} นิ้ว${isAdmin() ? ' (เปลี่ยนขนาด ผู้ส่ง และตำแหน่งได้ที่ ผู้ใช้และตั้งค่า)' : ''} ·
+      ตอนสั่งพิมพ์ ให้เลือกขนาดกระดาษในเครื่องพิมพ์ให้ตรงกับซอง และตั้งขอบกระดาษ (Margins) เป็น "ไม่มี"</p>
+    ${!e.env_sender_address ? `<div class="warn">ยังไม่ได้ตั้งที่อยู่ผู้ส่ง${isAdmin() ? ' — ตั้งได้ที่เมนู ผู้ใช้และตั้งค่า' : ' — แจ้งผู้ดูแลให้ตั้งค่า'}</div>` : ''}
+    ${noAddr.length ? `<div class="warn">ซองที่ยังไม่มีที่อยู่ผู้รับ: ${noAddr.map((p) => esc(p.customer)).join(', ')}</div>` : ''}
+    <label class="checkrow"><input type="checkbox" id="envRefs" checked> พิมพ์เลขที่ใบเสร็จตัวเล็กที่มุมซ้ายล่าง (ไว้ตรวจว่าใส่ใบเสร็จครบ)</label>
+    <div class="env-preview" id="envPrev"></div>
+    <div class="actions"><button type="button" class="btn ghost" data-close>ปิด</button><button type="button" class="btn" id="envGo">พิมพ์</button></div>`, true);
+  const render = () => {
+    const opt = { refs: $('#envRefs', d).checked };
+    const box = $('#envPrev', d);
+    box.innerHTML = parcels.map((p) => `<div class="env-scale">${envelopeHtml(p, opt)}</div>`).join('');
+    // ย่อให้พอดีกว้างของหน้าต่าง
+    const scale = Math.min(1, (box.clientWidth - 4) / (e.env_w * 96));
+    $$('.env-scale', box).forEach((w) => { w.style.height = `${e.env_h * 96 * scale}px`; w.firstElementChild.style.transform = `scale(${scale})`; });
+    return opt;
+  };
+  render();
+  $('#envRefs', d).onchange = render;
+  $('#envGo', d).onclick = () => printEnvelopes(parcels, render());
+}
+
+function printEnvelopes(parcels, opt) {
+  const e = S.envelope;
+  const area = document.createElement('div');
+  area.id = 'printArea';
+  area.innerHTML = parcels.map((p) => envelopeHtml(p, opt)).join('');
+  const page = document.createElement('style');
+  page.textContent = `@page { size: ${e.env_w}in ${e.env_h}in; margin: 0; }`;
+  document.head.append(page);
+  document.body.append(area);
+  document.body.classList.add('printing-env');
+  const done = () => { area.remove(); page.remove(); document.body.classList.remove('printing-env'); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  window.print();
+  setTimeout(done, 1000);
+}
+
+async function envelopeSettingsCard() {
+  const e = S.envelope;
+  return `<div class="card"><h3 style="margin-top:0">หน้าซอง</h3><form id="envForm">
+    <div class="grid">
+      <label>ชื่อผู้ส่ง <span class="mute">(ว่าง = ใช้ชื่อหน่วยงาน)</span><input name="env_sender_name" value="${esc(e.env_sender_name)}"></label>
+      <label class="span2">ที่อยู่ผู้ส่ง (พิมพ์หลายบรรทัดได้ ใส่เบอร์โทรด้วยก็ได้)<textarea name="env_sender_address" rows="3">${esc(e.env_sender_address)}</textarea></label>
+    </div>
+    <div class="grid">
+      <label>ขนาดซองสำเร็จรูป<select id="envPreset">
+        <option value="12.5x9">9 × 12½ นิ้ว</option><option value="12.75x9">9 × 12¾ นิ้ว (A4)</option><option value="10x7">7 × 10 นิ้ว</option>
+        <option value="9.5x4.125">4⅛ × 9½ นิ้ว (#10)</option><option value="8.66x4.33">DL 110 × 220 มม.</option><option value="">กำหนดเอง</option></select></label>
+      <label>ด้านยาว (นิ้ว)<input name="env_w" type="number" step="0.01" min="3" max="20" value="${e.env_w}" required></label>
+      <label>ด้านสั้น (นิ้ว)<input name="env_h" type="number" step="0.01" min="3" max="20" value="${e.env_h}" required></label>
+      <label>เลื่อนขวา (มม.) <span class="mute">ติดลบ = ซ้าย</span><input name="env_dx" type="number" step="0.5" min="-50" max="50" value="${e.env_dx}"></label>
+      <label>เลื่อนลง (มม.) <span class="mute">ติดลบ = ขึ้น</span><input name="env_dy" type="number" step="0.5" min="-50" max="50" value="${e.env_dy}"></label>
+    </div>
+    <p class="mute">ถ้าพิมพ์ออกมาแล้วตัวหนังสือเยื้อง ให้ปรับ "เลื่อนขวา/เลื่อนลง" แล้วลองพิมพ์ใหม่</p>
+    <div class="err"></div><div class="actions"><button type="button" class="btn ghost" id="envTest">ดูตัวอย่างหน้าซอง</button><button class="btn" type="submit">บันทึก</button></div>
+  </form></div>`;
+}
+function wireEnvelopeSettings() {
+  const f = $('#envForm').elements, preset = $('#envPreset');
+  const sync = () => { const k = `${Number(f.env_w.value)}x${Number(f.env_h.value)}`; preset.value = [...preset.options].some((o) => o.value === k) ? k : ''; };
+  sync();
+  preset.onchange = () => { if (preset.value) [f.env_w.value, f.env_h.value] = preset.value.split('x'); };
+  f.env_w.oninput = f.env_h.oninput = sync;
+  onSubmit($('#envForm'), async (v) => { const r = await api('/api/settings', { method: 'PUT', body: v }); S.envelope = r.envelope; toast('บันทึกค่าหน้าซองแล้ว'); });
+  $('#envTest').onclick = () => {
+    const saved = S.envelope;
+    S.envelope = { ...saved, ...Object.fromEntries(new FormData($('#envForm'))) };
+    envelopeDialog([{ customer: 'บริษัท ตัวอย่างผู้รับ จำกัด', destination: 'ฝ่ายบัญชี\n99/1 ถ.สุขุมวิท แขวงคลองเตย เขตคลองเตย กรุงเทพฯ 10110',
+      receipts: [{ receipt_no: 'RC0001' }, { receipt_no: 'RC0002' }] }]);
+    $('#dlg').addEventListener('close', () => (S.envelope = saved), { once: true });
   };
 }
 
@@ -472,10 +590,12 @@ async function adminPage() {
   $('#main').innerHTML = `<h2>ผู้ใช้และตั้งค่า</h2>
     <div class="card"><form id="orgForm" class="bar"><label class="grow">ชื่อหน่วยงาน (แสดงหน้าเข้าสู่ระบบและหัวรายงาน)
       <input name="orgName" required value="${esc(S.orgName)}"></label><button class="btn" type="submit">บันทึก</button><div class="err"></div></form></div>
+    ${await envelopeSettingsCard()}
     <div class="card"><div class="bar"><b class="grow">ผู้ใช้งาน</b><button class="btn" id="addUser">+ เพิ่มผู้ใช้</button></div>
       <div class="tablewrap" id="users"></div>
       <p class="mute">พนักงาน: บันทึกและแก้ไขรายการได้ · ผู้ดูแล: ทำได้ทุกอย่าง รวมถึงลบรายการและจัดการผู้ใช้</p></div>`;
   onSubmit($('#orgForm'), async (v) => { await api('/api/settings', { method: 'PUT', body: v }); S.orgName = v.orgName; toast('บันทึกแล้ว'); });
+  wireEnvelopeSettings();
   $('#addUser').onclick = () => userDialog();
   const users = await api('/api/users');
   $('#users').innerHTML = `<table><tr><th>ชื่อผู้ใช้</th><th>ชื่อ-สกุล</th><th>สิทธิ์</th><th>สถานะ</th><th></th></tr>

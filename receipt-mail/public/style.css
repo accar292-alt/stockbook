@@ -118,3 +118,26 @@ table.rtable input.r-no { min-width: 150px; }
   #slip table { width: 100%; border-collapse: collapse; }
   #slip th, #slip td { border: 1px solid #999; padding: 4px 8px; }
 }
+/* หน้าซอง (ขนาดจริงเป็นนิ้ว ตั้งจากค่าในระบบ) */
+.env-page { position: relative; overflow: hidden; background: #fff; color: #000; font-family: "Sarabun", "Leelawadee UI", Tahoma, sans-serif; line-height: 1.35; }
+.env-inner { position: absolute; inset: 0; }
+.env-label { font-size: 10pt; color: #444; }
+.env-from { position: absolute; left: .55in; top: .45in; max-width: 45%; font-size: 12pt; }
+.env-to { position: absolute; left: 42%; top: 40%; right: .6in; font-size: 17pt; }
+.env-name { font-size: 20pt; font-weight: 700; }
+.env-zip { display: flex; gap: 4px; margin-top: 8px; }
+.env-zip span { width: .38in; height: .44in; border: 1.5px solid #000; display: flex; align-items: center; justify-content: center; font-size: 18pt; font-weight: 700; }
+.env-ref { position: absolute; left: .55in; bottom: .35in; right: 50%; font-size: 8pt; color: #555; }
+.env-preview { display: flex; flex-direction: column; gap: 12px; max-height: 60vh; overflow: auto; background: var(--bg); padding: 8px; border-radius: 8px; }
+.env-scale { position: relative; overflow: hidden; flex: none; }
+.env-scale > .env-page { transform-origin: 0 0; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+.checkrow { flex-direction: row; align-items: center; gap: 6px; color: var(--text); }
+#printArea { display: none; }
+@media print {
+  body.printing-env { background: #fff; }
+  body.printing-env > *:not(#printArea) { display: none !important; }
+  body.printing-env #printArea { display: block; }
+  #printArea .env-page { page-break-after: always; break-after: page; }
+  #printArea .env-page:last-child { page-break-after: auto; break-after: auto; }
+}
+@media screen and (max-width: 700px) { table.ships td.pickcell { display: none; } }

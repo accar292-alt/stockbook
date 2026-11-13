@@ -179,9 +179,25 @@ async function startSession(req, res, userId) {
 }
 
 // ---------- auth ----------
+// ค่าหน้าซอง: ขนาดซอง (นิ้ว, ด้านยาว x ด้านสั้น) และตำแหน่งชดเชยของเครื่องพิมพ์ (มม.)
+const ENVELOPE = {
+  env_sender_name: { def: '', max: 200 },
+  env_sender_address: { def: '', max: 500 },
+  env_w: { def: '12.5', num: [3, 20] },
+  env_h: { def: '9', num: [3, 20] },
+  env_dx: { def: '0', num: [-50, 50] },
+  env_dy: { def: '0', num: [-50, 50] },
+};
+async function envelopeSettings() {
+  const rows = await db.all(`SELECT key, value FROM settings WHERE key LIKE 'env_%'`);
+  const got = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  return Object.fromEntries(Object.entries(ENVELOPE).map(([k, d]) => [k, d.num ? Number(got[k] ?? d.def) : got[k] ?? d.def]));
+}
+
 app.get('/api/state', async (req, res) => {
   const needSetup = (await db.get('SELECT COUNT(*) c FROM users')).c === 0;
-  res.json({ needSetup, user: req.user || null, orgName: await setting('org_name'), carriers: CARRIERS, statuses: STATUS_TH });
+  res.json({ needSetup, user: req.user || null, orgName: await setting('org_name'), carriers: CARRIERS, statuses: STATUS_TH,
+    envelope: req.user ? await envelopeSettings() : null });
 });
 
 app.post('/api/setup', async (req, res) => {
@@ -251,11 +267,26 @@ app.put('/api/users/:id', admin, async (req, res) => {
   res.json({ ok: true });
 });
 
+const UPSERT_SETTING = `INSERT INTO settings VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`;
 app.put('/api/settings', admin, async (req, res) => {
-  const orgName = str(req.body.orgName, 200);
-  if (!orgName) fail(400, 'กรอกชื่อหน่วยงาน');
-  await db.run(`INSERT INTO settings VALUES ('org_name', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, orgName);
-  res.json({ ok: true });
+  const stmts = [];
+  if (req.body.orgName !== undefined) {
+    const orgName = str(req.body.orgName, 200);
+    if (!orgName) fail(400, 'กรอกชื่อหน่วยงาน');
+    stmts.push({ sql: UPSERT_SETTING, args: ['org_name', orgName] });
+  }
+  for (const [k, d] of Object.entries(ENVELOPE)) {
+    if (req.body[k] === undefined) continue;
+    let v = str(req.body[k], d.max || 20);
+    if (d.num) {
+      const n = Number(v);
+      if (v === '' || !Number.isFinite(n) || n < d.num[0] || n > d.num[1]) fail(400, `ค่า ${k} ต้องอยู่ระหว่าง ${d.num[0]} ถึง ${d.num[1]}`);
+      v = String(n);
+    }
+    stmts.push({ sql: UPSERT_SETTING, args: [k, v] });
+  }
+  if (stmts.length) await client.batch(stmts, 'write');
+  res.json({ ok: true, envelope: await envelopeSettings() });
 });
 
 // ---------- parcels ----------
