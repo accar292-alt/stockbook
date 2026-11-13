@@ -134,23 +134,24 @@ async function loadCustomers(force) {
 const receiptRow = (r = {}) => `<tr class="rrow">
   <td class="rnum"></td>
   <td><input class="r-no" value="${esc(r.receipt_no)}" autocomplete="off" aria-label="เลขที่ใบเสร็จ" placeholder="เลขที่ใบเสร็จ"></td>
+  <td><input class="r-cust" value="${esc(r.customer)}" list="custList" autocomplete="off" aria-label="ชื่อลูกค้าของใบเสร็จ" placeholder="(เหมือนผู้รับซอง)"></td>
   <td><input class="r-date" type="date" value="${esc(r.bill_date)}" aria-label="วันที่ตัดบิล"></td>
   <td><button type="button" class="btn ghost sm r-del" title="เอาใบนี้ออก" aria-label="เอาใบนี้ออก">✕</button></td></tr>`;
 
 function parcelFields(p = {}) {
   const statusOpts = Object.entries(S.statuses).map(([k, t]) => `<option value="${k}">${esc(t)}</option>`).join('');
   return `<fieldset class="box"><legend>ใบเสร็จในซอง <span class="mute" data-count></span></legend>
-      <div class="tablewrap"><table class="rtable"><thead><tr><th>#</th><th>เลขที่ใบเสร็จ <b class="req">*</b></th><th>วันที่ตัดบิล <b class="req">*</b></th><th></th></tr></thead>
+      <div class="tablewrap"><table class="rtable"><thead><tr><th>#</th><th>เลขที่ใบเสร็จ <b class="req">*</b></th><th>ชื่อลูกค้า</th><th>วันที่ตัดบิล <b class="req">*</b></th><th></th></tr></thead>
         <tbody>${(p.receipts?.length ? p.receipts : [{}]).map(receiptRow).join('')}</tbody></table></div>
       <div class="bar" style="margin:8px 0 0">
         <button type="button" class="btn ghost sm" data-add>+ เพิ่มใบเสร็จ</button>
-        <span class="mute">กด Enter ที่ช่องเลขที่เพื่อเพิ่มแถวถัดไป · วางเลขหลายใบพร้อมกันได้ (บรรทัดละเลข) · วันที่ตัดบิลจะใช้ตามแถวก่อนหน้า</span>
+        <span class="mute">กด Enter ที่ช่องเลขที่เพื่อเพิ่มแถวถัดไป · วางเลขหลายใบพร้อมกันได้ (บรรทัดละเลข) · ชื่อลูกค้าและวันที่ตัดบิลจะใช้ตามแถวก่อนหน้า · เว้นชื่อลูกค้าว่าง = ใช้ชื่อผู้รับซอง</span>
       </div>
       <div class="dup" hidden></div>
     </fieldset>
     <fieldset class="box"><legend>การส่ง</legend>
       <div class="grid">
-        <label class="span2"><span>ชื่อลูกค้า <b class="req">*</b></span><input name="customer" required list="custList" value="${esc(p.customer)}" autocomplete="off"></label>
+        <label class="span2"><span>ส่งถึง (ชื่อลูกค้าผู้รับ) <b class="req">*</b></span><input name="customer" required list="custList" value="${esc(p.customer)}" autocomplete="off"></label>
         <label><span>วันที่ส่ง <span class="mute">(ว่าง = ยังไม่ส่ง)</span></span><input name="sent_date" type="date" value="${esc(p.sent_date)}"></label>
         <label>สถานะ<select name="status"><option value="">อัตโนมัติ (ตามวันที่ส่ง)</option>${statusOpts}</select></label>
         <label>ส่งทาง<input name="carrier" list="carrierList" value="${esc(p.carrier)}" autocomplete="off"></label>
@@ -164,8 +165,8 @@ function parcelFields(p = {}) {
 }
 
 // อ่านรายการใบเสร็จจากฟอร์ม
-const formReceipts = (form) => $$('.rrow', form).map((tr) => ({ receipt_no: $('.r-no', tr).value.trim(), bill_date: $('.r-date', tr).value }))
-  .filter((r) => r.receipt_no || r.bill_date);
+const formReceipts = (form) => $$('.rrow', form).map((tr) => ({ receipt_no: $('.r-no', tr).value.trim(), customer: $('.r-cust', tr).value.trim(), bill_date: $('.r-date', tr).value }))
+  .filter((r) => r.receipt_no || r.customer);
 
 // ผูกพฤติกรรมช่วยกรอก: แถวใบเสร็จ, เติมที่อยู่จากลูกค้าเดิม, เตือนเลขซ้ำ, ใส่วันที่ส่งเมื่อกรอกเลขพัสดุ
 async function wireParcelForm(form, excludeId = 0) {
@@ -176,8 +177,9 @@ async function wireParcelForm(form, excludeId = 0) {
     $('[data-count]', form).textContent = n ? `(${n} ใบ)` : '';
   };
   const lastDate = () => [...$$('.r-date', form)].reverse().find((i) => i.value)?.value || today();
+  const lastCust = () => [...$$('.r-cust', form)].at(-1)?.value || '';
   const addRow = (r = {}, focus = true) => {
-    tbody.insertAdjacentHTML('beforeend', receiptRow({ bill_date: lastDate(), ...r }));
+    tbody.insertAdjacentHTML('beforeend', receiptRow({ bill_date: lastDate(), customer: lastCust(), ...r }));
     const tr = tbody.lastElementChild;
     renumber();
     if (focus) $('.r-no', tr).focus();
@@ -289,6 +291,7 @@ function listPage() {
         <button class="btn" id="fimport">นำเข้า Excel</button>
       </div>
       <div class="selbar" id="selbar" hidden><b id="selCount"></b><button class="btn sm" id="selEnv">พิมพ์หน้าซอง</button>
+        <button class="btn sm" id="selSlip">พิมพ์ใบรายการใบเสร็จ</button>
         <button class="btn ghost sm" id="selNone">ยกเลิกการเลือก</button></div>
       <div class="print-head"><b>${esc(S.orgName)}</b> — รายการซองที่ส่ง <span id="printNote"></span></div>
       <div class="tablewrap" id="tbl"><p class="mute">กำลังโหลด…</p></div>
@@ -303,6 +306,7 @@ function listPage() {
   $('#fimport').onclick = importDialog;
   $('#selNone').onclick = () => { $$('.pick').forEach((c) => (c.checked = false)); selChanged(); };
   $('#selEnv').onclick = () => envelopeDialog(rows.filter((p) => picked().includes(p.id)));
+  $('#selSlip').onclick = () => slipDialog(rows.filter((p) => picked().includes(p.id)));
   load();
 }
 
@@ -310,9 +314,9 @@ function listPage() {
 function receiptChips(p) {
   const q = F.q.trim().toLowerCase();
   const max = 6;
-  const hit = (r) => q && r.receipt_no.toLowerCase().includes(q);
+  const hit = (r) => q && (r.receipt_no.toLowerCase().includes(q) || (r.customer || '').toLowerCase().includes(q));
   const list = [...p.receipts].sort((a, b) => hit(b) - hit(a));
-  return `<div class="chips">${list.slice(0, max).map((r) => `<span class="chip ${hit(r) ? 'hit' : ''}" title="ตัดบิล ${thDate(r.bill_date)}">${esc(r.receipt_no)}</span>`).join('')}
+  return `<div class="chips">${list.slice(0, max).map((r) => `<span class="chip ${hit(r) ? 'hit' : ''}" title="${esc(r.customer || p.customer)} · ตัดบิล ${thDate(r.bill_date)}">${esc(r.receipt_no)}${r.customer ? ` <span class="chip-c">${esc(r.customer)}</span>` : ''}</span>`).join('')}
     ${list.length > max ? `<span class="mute">+อีก ${list.length - max} ใบ</span>` : ''}</div>`;
 }
 const billRange = (p) => {
@@ -371,24 +375,6 @@ function histHtml(edits) {
     .map(([k, v]) => (k === 'via' ? `(${esc(v)})` : `${FIELD_TH[k] || k} เดิม "${esc(fmt(k, v))}"`)).join(', ')}</div>`).join('');
 }
 
-// ใบแนบซอง: รายการใบเสร็จที่อยู่ในซอง พิมพ์ใส่ไปกับซอง/เก็บเป็นหลักฐาน
-function printSlip(p) {
-  const el = document.createElement('div');
-  el.id = 'slip';
-  el.innerHTML = `<h3>${esc(S.orgName)}</h3><h2>รายการใบเสร็จในซอง</h2>
-    <p><b>ถึง:</b> ${esc(p.customer)}<br>${esc(p.destination).replace(/\n/g, '<br>')}</p>
-    <p>วันที่ส่ง: ${thDate(p.sent_date) || '-'} · ส่งทาง: ${esc(p.carrier) || '-'} · เลขพัสดุ: ${esc(p.tracking_no) || '-'}</p>
-    <table><tr><th>#</th><th>เลขที่ใบเสร็จ</th><th>วันที่ตัดบิล</th></tr>
-      ${p.receipts.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.receipt_no)}</td><td>${thDate(r.bill_date)}</td></tr>`).join('')}</table>
-    <p>รวม ${p.receipts.length} ใบ</p>`;
-  document.body.append(el);
-  document.body.classList.add('printing-slip');
-  const done = () => { el.remove(); document.body.classList.remove('printing-slip'); window.removeEventListener('afterprint', done); };
-  window.addEventListener('afterprint', done);
-  window.print();
-  setTimeout(done, 1000);
-}
-
 async function editDialog(id) {
   let p;
   try { p = await api(`/api/parcels/${id}`); } catch (e) { return toast(e.message, true); }
@@ -399,12 +385,12 @@ async function editDialog(id) {
     <div class="err"></div><div class="actions">
       ${isAdmin() ? '<button type="button" class="btn danger left" id="del">ลบซองนี้</button>' : ''}
       <button type="button" class="btn ghost" id="envBtn">พิมพ์หน้าซอง</button>
-      <button type="button" class="btn ghost" id="slipBtn">พิมพ์ใบแนบซอง</button>
+      <button type="button" class="btn ghost" id="slipBtn">พิมพ์ใบรายการใบเสร็จ</button>
       <button type="button" class="btn ghost" data-close>ปิด</button><button class="btn" type="submit">บันทึกการแก้ไข</button></div></form>`, true);
   const form = $('form', d);
   form.elements.status.value = p.status;
   wireParcelForm(form, id);
-  $('#slipBtn', d).onclick = () => printSlip(p);
+  $('#slipBtn', d).onclick = () => slipDialog([p]);
   $('#envBtn', d).onclick = () => envelopeDialog([p]);
   onSubmit(form, async (v) => {
     const res = await api(`/api/parcels/${id}`, { method: 'PUT', body: parcelBody(form, v) });
@@ -478,20 +464,89 @@ function envelopeDialog(parcels) {
   $('#envGo', d).onclick = () => printEnvelopes(parcels, render());
 }
 
-function printEnvelopes(parcels, opt) {
-  const e = S.envelope;
+// พิมพ์เฉพาะหน้าที่สร้างขึ้น (ซ่อนส่วนอื่นของหน้าเว็บ) พร้อมกำหนดขนาดกระดาษ
+function printPages(html, pageCss) {
   const area = document.createElement('div');
   area.id = 'printArea';
-  area.innerHTML = parcels.map((p) => envelopeHtml(p, opt)).join('');
+  area.innerHTML = html;
   const page = document.createElement('style');
-  page.textContent = `@page { size: ${e.env_w}in ${e.env_h}in; margin: 0; }`;
+  page.textContent = `@page { ${pageCss} }`;
   document.head.append(page);
   document.body.append(area);
   document.body.classList.add('printing-env');
-  const done = () => { area.remove(); page.remove(); document.body.classList.remove('printing-env'); window.removeEventListener('afterprint', done); };
+  const done = () => {
+    area.remove(); page.remove();
+    document.body.classList.remove('printing-env');
+    window.removeEventListener('afterprint', done);
+  };
   window.addEventListener('afterprint', done);
   window.print();
   setTimeout(done, 1000);
+}
+function printEnvelopes(parcels, opt) {
+  printPages(parcels.map((p) => envelopeHtml(p, opt)).join(''), `size: ${S.envelope.env_w}in ${S.envelope.env_h}in; margin: 0;`);
+}
+
+// ---------- ใบรายการใบเสร็จ (A4 ใส่ไปในซองให้ลูกค้า) ----------
+function slipHtml(p, opt) {
+  const e = S.envelope;
+  const nl = (t) => esc(t).replace(/\n/g, '<br>');
+  const sorted = opt.sort
+    ? [...p.receipts].sort((a, b) => a.bill_date.localeCompare(b.bill_date) || a.receipt_no.localeCompare(b.receipt_no, 'th', { numeric: true }))
+    : p.receipts;
+  const longDate = (d) => (d ? new Date(d + 'T00:00:00').toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' }) : '');
+  return `<div class="slip-page">
+    <div class="slip-head"><div><div class="slip-org">${esc(e.env_sender_name || S.orgName)}</div><div class="slip-small">${nl(e.env_sender_address)}</div></div>
+      <div class="slip-date">วันที่ ${longDate(p.sent_date || today())}</div></div>
+    <h1 class="slip-title">รายการใบเสร็จรับเงินที่จัดส่ง</h1>
+    <table class="slip-info"><tr><th>เรียน</th><td><b>${esc(p.customer)}</b>${p.destination ? `<br>${nl(p.destination)}` : ''}</td></tr>
+      ${p.carrier || p.tracking_no ? `<tr><th>จัดส่งทาง</th><td>${esc(p.carrier) || '-'}${p.tracking_no ? ` &nbsp; เลขพัสดุ <b>${esc(p.tracking_no)}</b>` : ''}</td></tr>` : ''}</table>
+    <p>ขอนำส่งใบเสร็จรับเงิน จำนวน <b>${p.receipts.length}</b> ฉบับ ตามรายการดังต่อไปนี้</p>
+    <table class="slip-list"><thead><tr><th class="c">ลำดับ</th><th>เลขที่ใบเสร็จ</th><th>ชื่อลูกค้า</th><th>วันที่ใบเสร็จ</th><th class="c">ตรวจรับ</th></tr></thead>
+      <tbody>${sorted.map((r, i) => `<tr><td class="c">${i + 1}</td><td class="nowrap">${esc(r.receipt_no)}</td><td>${esc(r.customer || p.customer)}</td><td class="nowrap">${thDate(r.bill_date)}</td><td class="c">☐</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td colspan="5">รวมทั้งสิ้น <b>${p.receipts.length}</b> ฉบับ</td></tr></tfoot></table>
+    ${p.note && opt.note ? `<p class="slip-small">หมายเหตุ: ${esc(p.note)}</p>` : ''}
+    <p>กรุณาตรวจสอบเอกสาร หากไม่ครบถ้วนหรือมีข้อสงสัย กรุณาติดต่อกลับ${opt.contact ? ` ${esc(opt.contact)}` : ''}</p>
+    ${opt.sign ? `<div class="slip-sign"><div>ลงชื่อ ..................................................<br>ผู้จัดส่ง<br>วันที่ ........./........./.........</div>
+      <div>ลงชื่อ ..................................................<br>ผู้รับเอกสาร<br>วันที่ ........./........./.........</div></div>` : ''}
+  </div>`;
+}
+
+function slipDialog(parcels) {
+  let lastContact = '';
+  try { lastContact = localStorage.getItem('slip-contact') || ''; } catch {}
+  const d = dialog(`<h3>พิมพ์ใบรายการใบเสร็จ ${parcels.length} ซอง</h3>
+    <p class="mute">กระดาษ A4 · 1 ซองได้ 1 ชุด ถ้าใบเสร็จเยอะจะต่อขึ้นหน้าถัดไปเอง</p>
+    <div class="grid">
+      <label class="checkrow"><input type="checkbox" id="slSign" checked> ช่องลงชื่อผู้จัดส่ง / ผู้รับ</label>
+      <label class="checkrow"><input type="checkbox" id="slSort" checked> เรียงตามวันที่และเลขที่ใบเสร็จ</label>
+      <label class="checkrow"><input type="checkbox" id="slNote"> พิมพ์หมายเหตุของซอง</label>
+    </div>
+    <label>เบอร์ติดต่อกลับ (แสดงท้ายเอกสาร)<input id="slContact" value="${esc(lastContact)}" placeholder="เช่น ฝ่ายบัญชี โทร 02-123-4567"></label>
+    <div class="env-preview" id="slPrev"></div>
+    <div class="actions"><button type="button" class="btn ghost" data-close>ปิด</button><button type="button" class="btn" id="slGo">พิมพ์</button></div>`, true);
+  const opt = () => ({ sign: $('#slSign', d).checked, sort: $('#slSort', d).checked, note: $('#slNote', d).checked, contact: $('#slContact', d).value.trim() });
+  const render = () => {
+    const box = $('#slPrev', d), o = opt();
+    box.innerHTML = parcels.map((p) => `<div class="env-scale">${slipHtml(p, o)}</div>`).join('');
+    const pageW = (210 / 25.4) * 96, scale = Math.min(1, (box.clientWidth - 4) / pageW);
+    $$('.env-scale', box).forEach((w) => {
+      const pg = w.firstElementChild;
+      pg.style.transform = `scale(${scale})`;
+      w.style.height = `${pg.offsetHeight * scale}px`;
+    });
+    return o;
+  };
+  render();
+  $$('input', d).forEach((i) => (i.oninput = i.onchange = render));
+  $('#slGo', d).onclick = () => {
+    const o = render();
+    try { localStorage.setItem('slip-contact', o.contact); } catch {}
+    printSlips(parcels, o);
+  };
+}
+function printSlips(parcels, o) {
+  printPages(parcels.map((p) => slipHtml(p, o)).join(''), 'size: A4 portrait; margin: 15mm 15mm 15mm 18mm;');
 }
 
 async function envelopeSettingsCard() {
