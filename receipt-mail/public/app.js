@@ -379,7 +379,8 @@ async function load() {
       <th class="noprint pickcell"><input type="checkbox" id="pickAll" title="เลือกทั้งหมด" aria-label="เลือกทั้งหมด"></th><th>ลูกค้า / ใบเสร็จในซอง</th><th>ตัดบิล</th><th>วันที่ส่ง</th><th>ส่งไปที่</th><th>ส่งทาง</th><th>เลขพัสดุ</th><th>สถานะ</th></tr></thead>
     <tbody>${rows.map((p) => `<tr class="click ${p.status}" data-id="${p.id}">
       <td class="noprint pickcell"><input type="checkbox" class="pick" value="${p.id}" aria-label="เลือกซอง ${esc(p.customer)}"></td>
-      <td class="cust"><b>${esc(p.customer)}</b> <span class="count">${p.receipts.length} ใบ${sumAmount(p.receipts) != null ? ` · ${money(sumAmount(p.receipts))} บาท` : ''}</span>${receiptChips(p)}${p.note ? `<div class="mute">${esc(p.note)}</div>` : ''}</td>
+      <td class="cust"><b>${esc(p.customer)}</b> <span class="count">${p.receipts.length} ใบ${sumAmount(p.receipts) != null ? ` · ${money(sumAmount(p.receipts))} บาท` : ''}</span>${p.edit_count
+        ? ` <span class="edited" title="แก้ล่าสุดโดย ${esc(p.updated_name)} ${thTime(p.updated_at)}">✎ แก้ไข ${p.edit_count} ครั้ง</span>` : ''}${receiptChips(p)}${p.note ? `<div class="mute">${esc(p.note)}</div>` : ''}</td>
       <td class="nowrap" data-l="ตัดบิล">${billRange(p)}</td>
       <td class="nowrap" data-l="วันที่ส่ง">${thDate(p.sent_date) || '<span class="mute">-</span>'}</td>
       <td class="addr" data-l="ส่งไปที่">${esc(p.destination).replace(/\n/g, '<br>') || '<span class="mute">-</span>'}</td>
@@ -403,11 +404,19 @@ function selChanged() {
 
 const FIELD_TH = { customer: 'ลูกค้า', sent_date: 'วันที่ส่ง', destination: 'ส่งไปที่', carrier: 'ส่งทาง', tracking_no: 'เลขพัสดุ',
   status: 'สถานะ', note: 'หมายเหตุ', receipts: 'ใบเสร็จในซอง' };
+// ประวัติการแก้ไข: ใครแก้ เมื่อไร หมายเหตุ และแต่ละช่อง ค่าเดิม → ค่าใหม่
 function histHtml(edits) {
   const fmt = (k, v) => (k.endsWith('_date') ? thDate(v) : k === 'status' ? S.statuses[v] : k === 'receipts'
-    ? v.replace(/(\d{4}-\d{2}-\d{2})/g, (d) => thDate(d)) : v) || '(ว่าง)';
-  return edits.map((e) => `<div>${thTime(e.edited_at)} · ${esc(e.name)} แก้: ${Object.entries(JSON.parse(e.before))
-    .map(([k, v]) => (k === 'via' ? `(${esc(v)})` : `${FIELD_TH[k] || k} เดิม "${esc(fmt(k, v))}"`)).join(', ')}</div>`).join('');
+    ? String(v).replace(/(\d{4}-\d{2}-\d{2})/g, (d) => thDate(d)) : v) || '(ว่าง)';
+  return edits.map((e) => {
+    const before = JSON.parse(e.before || '{}'), after = JSON.parse(e.after || '{}');
+    const reason = e.reason || before.via || '';
+    const lines = Object.keys(before).filter((k) => k !== 'via').map((k) => k === 'receipts' && after.receipts
+      ? `<li><b>${FIELD_TH[k]}</b>: ${esc(fmt(k, after.receipts))}</li>`
+      : `<li><b>${FIELD_TH[k] || k}</b>: <s>${esc(fmt(k, before[k]))}</s> → ${k in after ? esc(fmt(k, after[k])) : '<span class="mute">(ไม่ได้บันทึกค่าใหม่)</span>'}</li>`);
+    return `<div class="hist-item"><div><b>${esc(e.name)}</b> <span class="mute">แก้ไขเมื่อ ${thTime(e.edited_at)}</span></div>
+      ${reason ? `<div>หมายเหตุ: ${esc(reason)}</div>` : ''}<ul>${lines.join('')}</ul></div>`;
+  }).join('');
 }
 
 async function editDialog(id) {
@@ -416,7 +425,9 @@ async function editDialog(id) {
   const hist = histHtml(p.edits);
   const d = dialog(`<h3>ซองของ ${esc(p.customer)} ${tag(p.status)}</h3><form>${parcelFields(p)}
     <p class="mute">บันทึกโดย ${esc(p.created_name)} ${thTime(p.created_at)}${p.updated_at ? ` · แก้ล่าสุด ${esc(p.updated_name)} ${thTime(p.updated_at)}` : ''}</p>
-    ${hist ? `<div class="hist"><b>ประวัติการแก้ไข</b>${hist}</div>` : ''}
+    ${hist ? `<div class="hist"><b>ประวัติการแก้ไข (${p.edits.length} ครั้ง)</b>${hist}</div>` : ''}
+    <label class="edit-reason"><span>หมายเหตุการแก้ไข <b class="req">*</b> <span class="mute">(บันทึกพร้อมชื่อผู้แก้ไข: ${esc(S.user.name)})</span></span>
+      <input name="edit_reason" maxlength="300" autocomplete="off" placeholder="แก้อะไร เพราะอะไร เช่น ลูกค้าแจ้งเปลี่ยนที่อยู่จัดส่ง"></label>
     <div class="err"></div><div class="actions">
       ${isAdmin() ? '<button type="button" class="btn danger left" id="del">ลบซองนี้</button>' : ''}
       <button type="button" class="btn ghost" id="envBtn">พิมพ์หน้าซอง</button>

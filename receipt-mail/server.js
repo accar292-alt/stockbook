@@ -72,10 +72,11 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_pr_parcel ON parcel_receipts(parcel_id);
   CREATE INDEX IF NOT EXISTS idx_pr_receipt ON parcel_receipts(receipt_no);
   CREATE INDEX IF NOT EXISTS idx_pr_bill ON parcel_receipts(bill_date);
-  -- ประวัติการแก้ไข: before = ข้อมูลก่อนแก้ (JSON) ไว้ตรวจสอบย้อนหลัง
+  -- ประวัติการแก้ไข: ใครแก้ (edited_by) เมื่อไร หมายเหตุ (reason) และค่าเดิม/ค่าใหม่ของช่องที่เปลี่ยน (JSON)
   CREATE TABLE IF NOT EXISTS parcel_edits (
     id INTEGER PRIMARY KEY, parcel_id INTEGER NOT NULL REFERENCES parcels(id),
-    edited_by INTEGER NOT NULL REFERENCES users(id), edited_at TEXT NOT NULL, before TEXT NOT NULL
+    edited_by INTEGER NOT NULL REFERENCES users(id), edited_at TEXT NOT NULL, before TEXT NOT NULL,
+    after TEXT NOT NULL DEFAULT '{}', reason TEXT NOT NULL DEFAULT ''
   );
   CREATE INDEX IF NOT EXISTS idx_edits_parcel ON parcel_edits(parcel_id);
   CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -92,6 +93,9 @@ const ensureReady = () => (ready ??= (async () => {
     if (!cols.includes('customer')) await db.run(`ALTER TABLE parcel_receipts ADD COLUMN customer TEXT NOT NULL DEFAULT ''`);
     if (!cols.includes('amount')) await db.run('ALTER TABLE parcel_receipts ADD COLUMN amount INTEGER');
     if (!cols.includes('detail')) await db.run(`ALTER TABLE parcel_receipts ADD COLUMN detail TEXT NOT NULL DEFAULT ''`);
+    const ecols = (await db.all(`SELECT name FROM pragma_table_info('parcel_edits')`)).map((c) => c.name);
+    if (!ecols.includes('after')) await db.run(`ALTER TABLE parcel_edits ADD COLUMN after TEXT NOT NULL DEFAULT '{}'`);
+    if (!ecols.includes('reason')) await db.run(`ALTER TABLE parcel_edits ADD COLUMN reason TEXT NOT NULL DEFAULT ''`);
   }
   catch (e) { throw new HttpError(500, `เชื่อมต่อฐานข้อมูลไม่ได้: ${e.message}`); }
 })().catch((e) => { ready = null; throw e; }));
@@ -314,7 +318,8 @@ app.put('/api/settings', admin, async (req, res) => {
 
 // ---------- parcels ----------
 const PARCEL_COLS = `p.id, p.customer, p.destination, p.sent_date, p.carrier, p.tracking_no, p.status, p.note,
-  p.created_at, p.updated_at, cu.name AS created_name, uu.name AS updated_name`;
+  p.created_at, p.updated_at, cu.name AS created_name, uu.name AS updated_name,
+  (SELECT COUNT(*) FROM parcel_edits e WHERE e.parcel_id = p.id) AS edit_count`;
 const PARCEL_FROM = `FROM parcels p JOIN users cu ON cu.id = p.created_by LEFT JOIN users uu ON uu.id = p.updated_by`;
 
 // ตัวกรอง: q = ค้นเลขใบเสร็จ/ลูกค้า/เลขพัสดุ/ที่อยู่, status, ช่วงวันที่ (by = bill: วันที่ตัดบิลของใบเสร็จในซอง | sent)
@@ -366,7 +371,7 @@ app.get('/api/parcels/:id', auth, async (req, res) => {
   const p = await db.get(`SELECT ${PARCEL_COLS} ${PARCEL_FROM} WHERE p.id = ? AND p.deleted = 0`, Number(req.params.id));
   if (!p) fail(404, 'ไม่พบรายการ');
   toBaht(await withReceipts([p]));
-  p.edits = await db.all(`SELECT e.edited_at, e.before, u.name FROM parcel_edits e JOIN users u ON u.id = e.edited_by
+  p.edits = await db.all(`SELECT e.edited_at, e.before, e.after, e.reason, u.name FROM parcel_edits e JOIN users u ON u.id = e.edited_by
                           WHERE e.parcel_id = ? ORDER BY e.id DESC`, p.id);
   res.json(p);
 });
@@ -405,15 +410,39 @@ async function createParcel(p, userId, t = now()) {
   finally { tx.close(); }
 }
 
-// คำสั่งแก้ไขซอง (พร้อมประวัติ); คืน [] ถ้าไม่มีอะไรเปลี่ยน
-function updateStatements(old, p, userId, t, via) {
-  const before = Object.fromEntries(PARCEL_FIELDS.filter((k) => old[k] !== p[k]).map((k) => [k, old[k]]));
+// สรุปว่าใบเสร็จในซองเปลี่ยนอะไร (เพิ่ม/เอาออก/แก้ช่องไหน) สำหรับประวัติการแก้ไข
+const fmtSatang = (v) => (v == null ? '-' : (v / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+function receiptsDiff(a, b) {
+  const A = new Map(a.map((r) => [r.receipt_no, r])), B = new Map(b.map((r) => [r.receipt_no, r]));
+  const out = [];
+  const added = b.filter((r) => !A.has(r.receipt_no)).map((r) => r.receipt_no);
+  const removed = a.filter((r) => !B.has(r.receipt_no)).map((r) => r.receipt_no);
+  if (added.length) out.push(`เพิ่มใบเสร็จ ${added.join(', ')}`);
+  if (removed.length) out.push(`เอาใบเสร็จออก ${removed.join(', ')}`);
+  for (const r of b) {
+    const o = A.get(r.receipt_no);
+    if (!o) continue;
+    const ch = [];
+    if (o.bill_date !== r.bill_date) ch.push(`วันที่ตัดบิล ${o.bill_date} → ${r.bill_date}`);
+    if ((o.customer || '') !== (r.customer || '')) ch.push(`ลูกค้า "${o.customer || '(ผู้รับซอง)'}" → "${r.customer || '(ผู้รับซอง)'}"`);
+    if ((o.amount ?? null) !== (r.amount ?? null)) ch.push(`ยอดเงิน ${fmtSatang(o.amount)} → ${fmtSatang(r.amount)}`);
+    if ((o.detail || '') !== (r.detail || '')) ch.push(`รายละเอียดสินค้า "${o.detail || '-'}" → "${r.detail || '-'}"`);
+    if (ch.length) out.push(`${r.receipt_no}: ${ch.join(', ')}`);
+  }
+  return out.length ? out.join(' · ') : 'เปลี่ยนลำดับใบเสร็จ';
+}
+
+// คำสั่งแก้ไขซอง พร้อมบันทึกประวัติ (ใครแก้ เมื่อไร หมายเหตุ ค่าเดิม → ค่าใหม่); คืน [] ถ้าไม่มีอะไรเปลี่ยน
+function updateStatements(old, p, userId, t, reason = '') {
+  const keys = PARCEL_FIELDS.filter((k) => old[k] !== p[k]);
+  const before = Object.fromEntries(keys.map((k) => [k, old[k]]));
+  const after = Object.fromEntries(keys.map((k) => [k, p[k]]));
   const changedReceipts = receiptsText(old.receipts) !== receiptsText(p.receipts);
-  if (changedReceipts) before.receipts = receiptsText(old.receipts);
+  if (changedReceipts) { before.receipts = receiptsText(old.receipts); after.receipts = receiptsDiff(old.receipts, p.receipts); }
   if (!Object.keys(before).length) return [];
-  if (via) before.via = via;
   return [
-    { sql: 'INSERT INTO parcel_edits (parcel_id, edited_by, edited_at, before) VALUES (?, ?, ?, ?)', args: [old.id, userId, t, JSON.stringify(before)] },
+    { sql: 'INSERT INTO parcel_edits (parcel_id, edited_by, edited_at, before, after, reason) VALUES (?, ?, ?, ?, ?, ?)',
+      args: [old.id, userId, t, JSON.stringify(before), JSON.stringify(after), reason] },
     { sql: `UPDATE parcels SET customer = ?, destination = ?, sent_date = ?, carrier = ?, tracking_no = ?, status = ?, note = ?,
               updated_by = ?, updated_at = ? WHERE id = ?`, args: [...parcelArgs(p), userId, t, old.id] },
     ...(changedReceipts ? [{ sql: 'DELETE FROM parcel_receipts WHERE parcel_id = ?', args: [old.id] }, ...insertReceipts(old.id, p.receipts)] : []),
@@ -430,8 +459,10 @@ app.put('/api/parcels/:id', auth, async (req, res) => {
   await withReceipts([old]);
   const body = { ...old, ...req.body };
   if (!req.body.receipts) body.receipts = old.receipts.map((r) => ({ ...r, amount: baht(r.amount) }));
-  const stmts = updateStatements(old, parcelInput(body), req.user.id, now());
+  const reason = str(req.body.edit_reason, 300);
+  const stmts = updateStatements(old, parcelInput(body), req.user.id, now(), reason);
   if (!stmts.length) return res.json({ ok: true, unchanged: true });
+  if (!reason) fail(400, 'กรอกหมายเหตุการแก้ไข ว่าแก้อะไรและเพราะอะไร');
   await client.batch(stmts, 'write');
   res.json({ ok: true });
 });
@@ -618,7 +649,7 @@ app.post('/api/import', auth, async (req, res) => {
       const r = await tx.execute({ sql: INSERT_PARCEL, args: [...parcelArgs(p), req.user.id, t] });
       for (const s of insertReceipts(Number(r.lastInsertRowid), p.receipts)) await tx.execute(s);
     }
-    for (const { old, p } of edits) for (const s of updateStatements(old, p, req.user.id, t, 'นำเข้า Excel')) await tx.execute(s);
+    for (const { old, p } of edits) for (const s of updateStatements(old, p, req.user.id, t, 'นำเข้าจากไฟล์ Excel')) await tx.execute(s);
     await tx.commit();
   } catch (e) { await tx.rollback().catch(() => {}); throw e; }
   finally { tx.close(); }

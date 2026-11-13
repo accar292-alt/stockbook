@@ -168,3 +168,9 @@ table.rtable th.num { text-align: right; }
 .slip-list .num { width: 17%; }
 .saved-card { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--t-ok, #e3f4e8); border-color: #b7dfc4; }
 .saved-card .grow { flex: 1; min-width: 220px; }
+.hist { max-height: 260px; }
+.hist-item { padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.hist-item ul { margin: 2px 0 0; padding-left: 20px; }
+.hist-item s { color: var(--mute); }
+.edit-reason { margin-top: 8px; }
+.edited { font-size: .78em; color: var(--info); white-space: nowrap; }
