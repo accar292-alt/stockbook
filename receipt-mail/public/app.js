@@ -14,6 +14,72 @@ function sumAmount(list) {
   const xs = list.map((r) => numOrNull(r.amount)).filter((n) => n != null);
   return xs.length ? Math.round(xs.reduce((a, b) => a + Math.round(b * 100), 0)) / 100 : null;
 }
+// ---------- ช่องวันที่แบบ วว/ดด/ปปปป (พ.ศ.) ----------
+// ช่อง <input type="date"> เดิมยังอยู่ (ซ่อนไว้) และเก็บค่า YYYY-MM-DD ตามเดิม โค้ดส่วนอื่นอ่าน .value ได้เหมือนเดิม
+// ผู้ใช้พิมพ์/เห็นในช่องข้อความที่วางทับ เช่น 05/11/2569 และกดปุ่มปฏิทินเพื่อเลือกวันได้
+function parseThaiDate(text) {
+  const t = String(text || '').trim();
+  if (!t) return '';
+  let m = /^(\d{1,2})[/.\-\s](\d{1,2})[/.\-\s](\d{2}|\d{4})$/.exec(t) || /^(\d{2})(\d{2})(\d{4})$/.exec(t);
+  if (!m) return null;
+  let [d, mo, y] = [+m[1], +m[2], +m[3]];
+  if (y < 100) y += 2500;          // ปี 2 หลัก = พ.ศ. เช่น 69 → 2569
+  if (y > 2400) y -= 543;          // พ.ศ. → ค.ศ.
+  const iso = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  const dt = new Date(iso + 'T00:00:00Z');
+  return !isNaN(dt) && dt.getUTCDate() === d && dt.getUTCMonth() + 1 === mo ? iso : null;
+}
+const VALUE = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+function enhanceDate(real) {
+  if (real.dataset.th) return;
+  real.dataset.th = '1';
+  const wrap = document.createElement('span');
+  wrap.className = 'dwrap';
+  const text = document.createElement('input');
+  text.type = 'text';
+  text.className = 'dtext';
+  text.inputMode = 'numeric';
+  text.maxLength = 10;
+  text.placeholder = 'วว/ดด/ปปปป';
+  text.autocomplete = 'off';
+  text.setAttribute('aria-label', (real.getAttribute('aria-label') || real.closest('label')?.firstChild?.textContent || 'วันที่').trim() + ' (วว/ดด/ปปปป)');
+  const pick = document.createElement('button');
+  pick.type = 'button';
+  pick.className = 'dpick-btn';
+  pick.tabIndex = -1;
+  pick.title = 'เลือกจากปฏิทิน';
+  pick.setAttribute('aria-label', 'เลือกจากปฏิทิน');
+  pick.textContent = '📅';
+  real.replaceWith(wrap);
+  wrap.append(text, pick, real);
+  real.classList.add('dreal');
+  real.tabIndex = -1;
+  const show = () => { text.value = thDate(VALUE.get.call(real)); text.classList.remove('bad'); };
+  // ตั้งค่าจากโค้ด (real.value = ...) → อัปเดตช่องที่ผู้ใช้เห็นด้วย
+  Object.defineProperty(real, 'value', { configurable: true, get() { return VALUE.get.call(this); }, set(v) { VALUE.set.call(this, v); show(); } });
+  show();
+  // พิมพ์ตัวเลข: ใส่ / ให้อัตโนมัติ
+  text.addEventListener('input', (e) => {
+    if (e.inputType?.startsWith('delete')) return;
+    const v = text.value.replace(/\/{2,}/g, '/');
+    if (/^\d{8}$/.test(v)) text.value = `${v.slice(0, 2)}/${v.slice(2, 4)}/${v.slice(4)}`; // วางตัวเลข 8 หลักติดกัน
+    else if (/^\d{2}$/.test(v) || /^\d{1,2}\/\d{2}$/.test(v)) text.value = v + '/';         // พิมพ์ครบวัน/เดือน → ใส่ / ให้
+    else text.value = v;
+  });
+  const commit = () => {
+    const iso = parseThaiDate(text.value);
+    if (iso === null) { text.classList.add('bad'); text.title = 'วันที่ไม่ถูกต้อง ใช้รูปแบบ วว/ดด/ปปปป เช่น 05/11/2569'; VALUE.set.call(real, ''); }
+    else { VALUE.set.call(real, iso); show(); text.title = ''; }
+    real.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  text.addEventListener('change', commit);
+  text.addEventListener('keydown', (e) => { if (e.key === 'Enter') commit(); });
+  real.addEventListener('change', (e) => { if (e.isTrusted) show(); }); // เลือกจากปฏิทิน
+  pick.addEventListener('click', () => { try { real.showPicker(); } catch { text.focus(); } });
+}
+new MutationObserver(() => $$('input[type=date]:not([data-th])').forEach(enhanceDate))
+  .observe(document.documentElement, { childList: true, subtree: true });
+
 let S = { user: null, orgName: '', carriers: [], statuses: {} };
 const isAdmin = () => S.user?.role === 'admin';
 
@@ -745,11 +811,11 @@ async function customersPage() {
   const render = () => {
     const q = custQ.trim().toLowerCase();
     const rows = list.filter((c) => !q || [c.name, c.address, c.phone, c.note].some((x) => (x || '').toLowerCase().includes(q)));
-    $('#ctbl').innerHTML = rows.length ? `<table class="ctable"><thead><tr><th>ชื่อลูกค้า</th><th>ที่อยู่</th><th>เบอร์โทร</th><th class="num">ซองที่ส่ง</th><th></th></tr></thead>
+    $('#ctbl').innerHTML = rows.length ? `<table class="ctable"><thead><tr><th>ชื่อลูกค้า</th><th>ที่อยู่</th><th>เบอร์โทร</th><th></th></tr></thead>
       <tbody>${rows.map((c) => `<tr class="click" data-cid="${c.id}"><td><b>${esc(c.name)}</b>${c.note ? `<div class="mute">${esc(c.note)}</div>` : ''}</td>
         <td class="addr" data-l="ที่อยู่">${esc(c.address).replace(/\n/g, '<br>') || '<span class="mute">ยังไม่มีที่อยู่</span>'}</td>
         <td class="nowrap" data-l="โทร">${esc(c.phone) || '<span class="mute">-</span>'}</td>
-        <td class="num" data-l="ซองที่ส่ง">${c.parcel_count}</td><td class="nowrap"><button class="btn ghost sm" data-edit="${c.id}">แก้ไข</button></td></tr>`).join('')}</tbody></table>
+        <td class="nowrap"><button class="btn ghost sm" data-edit="${c.id}">แก้ไข</button></td></tr>`).join('')}</tbody></table>
       <p class="mute">ทั้งหมด ${list.length} ราย${q ? ` · พบ ${rows.length} ราย` : ''}</p>` : `<p class="mute">${list.length ? 'ไม่พบลูกค้าที่ค้นหา' : 'ยังไม่มีลูกค้าในสมุด — กด "+ เพิ่มลูกค้า" หรือนำเข้าจาก Excel'}</p>`;
     $$('#ctbl tr[data-cid]').forEach((tr) => (tr.onclick = () => customerDialog(list.find((c) => c.id === Number(tr.dataset.cid)))));
   };
@@ -764,7 +830,7 @@ function customerDialog(c) {
     <label>ที่อยู่สำหรับส่งเอกสาร (ชื่อผู้รับ / ที่อยู่ / รหัสไปรษณีย์)<textarea name="address" rows="4">${esc(c?.address)}</textarea></label>
     <label>เบอร์โทร<input name="phone" value="${esc(c?.phone)}" autocomplete="off"></label>
     <label>หมายเหตุ<input name="note" value="${esc(c?.note)}" placeholder="เช่น ส่งถึงฝ่ายบัญชี คุณ…"></label>
-    ${c ? `<p class="mute">ส่งไปแล้ว ${c.parcel_count} ซอง${c.updated_at ? ` · แก้ล่าสุด ${esc(c.updated_name || '')} ${thTime(c.updated_at)}` : ''}</p>` : ''}
+    ${c?.updated_at ? `<p class="mute">แก้ล่าสุด ${esc(c.updated_name || '')} ${thTime(c.updated_at)}</p>` : ''}
     <div class="err"></div><div class="actions">
       ${c && isAdmin() ? '<button type="button" class="btn danger left" id="cDel">ลบออกจากสมุด</button>' : ''}
       <button type="button" class="btn ghost" data-close>ยกเลิก</button><button class="btn" type="submit">บันทึก</button></div></form>`);

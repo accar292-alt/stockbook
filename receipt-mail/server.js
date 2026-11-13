@@ -408,8 +408,7 @@ function customerInput(b) {
   return c;
 }
 app.get('/api/customers', auth, async (req, res) => {
-  res.json(await db.all(`SELECT c.id, c.name, c.address, c.phone, c.note, c.updated_at, u.name AS updated_name,
-      (SELECT COUNT(*) FROM parcels p WHERE p.customer = c.name AND p.deleted = 0) AS parcel_count
+  res.json(await db.all(`SELECT c.id, c.name, c.address, c.phone, c.note, c.updated_at, u.name AS updated_name
     FROM customers c LEFT JOIN users u ON u.id = c.updated_by ORDER BY c.name`));
 });
 app.post('/api/customers', auth, async (req, res) => {

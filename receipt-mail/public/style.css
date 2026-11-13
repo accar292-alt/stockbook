@@ -185,3 +185,12 @@ table.rtable th.num { text-align: right; }
   table.ctable td[data-l]::before { content: attr(data-l) ": "; color: var(--mute); }
   table.ctable td.num { text-align: left; }
 }
+/* ช่องวันที่ วว/ดด/ปปปป */
+.dwrap { position: relative; display: flex; align-items: center; gap: 4px; width: 100%; }
+.dwrap .dtext { flex: 1; min-width: 0; font-variant-numeric: tabular-nums; }
+.dwrap .dtext.bad { border-color: var(--bad); outline-color: var(--bad); }
+.dwrap .dreal { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; padding: 0; border: 0; }
+.dpick-btn { font: inherit; line-height: 1; padding: 6px 7px; border: 1px solid #c3cbd6; border-radius: 6px; background: transparent; cursor: pointer; }
+.dpick-btn:hover { border-color: var(--pri); }
+table.rtable .dwrap { width: 150px; }
+.bar .dwrap { width: 150px; }
