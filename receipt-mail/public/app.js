@@ -582,6 +582,8 @@ function splitPostcode(text) {
   const m = /^([\s\S]*?)[\s,]*(\d{5})\s*$/.exec(text || '');
   return m ? { address: m[1].trim(), postcode: m[2] } : { address: (text || '').trim(), postcode: '' };
 }
+// ตัวเลือกการพิมพ์ที่จำไว้ในเครื่อง (ค่าเริ่มต้น = เปิด)
+const envPref = (key) => { try { return localStorage.getItem(key) !== '0'; } catch { return true; } };
 // กรอบใบอนุญาตชำระค่าฝากส่งเป็นรายเดือน (มุมขวาบนของหน้าซอง) — ไม่มีเลขใบอนุญาต = ไม่พิมพ์
 const permitHtml = (co) => (co.permit_no ? `<div class="env-permit"><div>ชำระค่าฝากส่งเป็นรายเดือน</div>
   <div>ใบอนุญาตที่ ${esc(co.permit_no)}</div>${co.permit_office ? `<div>${esc(co.permit_office)}</div>` : ''}</div>` : '');
@@ -594,7 +596,7 @@ function envelopeHtml(p, opt) {
   const refs = p.receipts.map((r) => r.receipt_no);
   return `<div class="env-page" style="width:${e.env_w}in;height:${e.env_h}in">
     <div class="env-inner" style="transform:translate(${e.env_dx}mm,${e.env_dy}mm)">
-      <div class="env-from"><div class="env-label">ผู้ส่ง</div><b>${esc(co.name)}</b><br>${nl(co.address)}${co.phone ? `<br>โทร ${esc(co.phone)}` : ''}</div>
+      ${opt.sender !== false ? `<div class="env-from"><div class="env-label">ผู้ส่ง</div><b>${esc(co.name)}</b><br>${nl(co.address)}${co.phone ? `<br>โทร ${esc(co.phone)}` : ''}</div>` : ''}
       ${permitHtml(co)}
       <div class="env-to"><div class="env-label">กรุณาส่ง</div>
         ${showName ? `<div class="env-name">${esc(p.customer)}</div>` : ''}
@@ -613,11 +615,12 @@ function envelopeDialog(parcels) {
       ตอนสั่งพิมพ์ ให้เลือกขนาดกระดาษในเครื่องพิมพ์ให้ตรงกับซอง และตั้งขอบกระดาษ (Margins) เป็น "ไม่มี"</p>
     ${parcels.some((p) => !companyOf(p.company_id).address) ? `<div class="warn">บริษัทผู้ส่งยังไม่มีที่อยู่: ${[...new Set(parcels.filter((p) => !companyOf(p.company_id).address).map((p) => esc(companyOf(p.company_id).name || '(ไม่ระบุ)')))].join(', ')}${isAdmin() ? ' — ตั้งได้ที่เมนู ผู้ใช้และตั้งค่า' : ' — แจ้งผู้ดูแลให้ตั้งค่า'}</div>` : ''}
     ${noAddr.length ? `<div class="warn">ซองที่ยังไม่มีที่อยู่ผู้รับ: ${noAddr.map((p) => esc(p.customer)).join(', ')}</div>` : ''}
+    <label class="checkrow"><input type="checkbox" id="envSender"${envPref('env-sender') ? ' checked' : ''}> พิมพ์ชื่อ-ที่อยู่ผู้ส่ง (มุมซ้ายบน)</label>
     <label class="checkrow"><input type="checkbox" id="envRefs" checked> พิมพ์เลขที่ใบเสร็จตัวเล็กที่มุมซ้ายล่าง (ไว้ตรวจว่าใส่ใบเสร็จครบ)</label>
     <div class="env-preview" id="envPrev"></div>
     <div class="actions"><button type="button" class="btn ghost" data-close>ปิด</button><button type="button" class="btn" id="envGo">พิมพ์</button></div>`, true);
   const render = () => {
-    const opt = { refs: $('#envRefs', d).checked };
+    const opt = { refs: $('#envRefs', d).checked, sender: $('#envSender', d).checked };
     const box = $('#envPrev', d);
     box.innerHTML = parcels.map((p) => `<div class="env-scale">${envelopeHtml(p, opt)}</div>`).join('');
     // ย่อให้พอดีกว้างของหน้าต่าง
@@ -627,6 +630,8 @@ function envelopeDialog(parcels) {
   };
   render();
   $('#envRefs', d).onchange = render;
+  // จำตัวเลือกพิมพ์ผู้ส่งไว้สำหรับครั้งถัดไป
+  $('#envSender', d).onchange = () => { try { localStorage.setItem('env-sender', $('#envSender', d).checked ? '1' : '0'); } catch {} render(); };
   $('#envGo', d).onclick = () => printEnvelopes(parcels, render());
 }
 
