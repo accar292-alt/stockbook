@@ -582,6 +582,9 @@ function splitPostcode(text) {
   const m = /^([\s\S]*?)[\s,]*(\d{5})\s*$/.exec(text || '');
   return m ? { address: m[1].trim(), postcode: m[2] } : { address: (text || '').trim(), postcode: '' };
 }
+// กรอบใบอนุญาตชำระค่าฝากส่งเป็นรายเดือน (มุมขวาบนของหน้าซอง) — ไม่มีเลขใบอนุญาต = ไม่พิมพ์
+const permitHtml = (co) => (co.permit_no ? `<div class="env-permit"><div>ชำระค่าฝากส่งเป็นรายเดือน</div>
+  <div>ใบอนุญาตที่ ${esc(co.permit_no)}</div>${co.permit_office ? `<div>${esc(co.permit_office)}</div>` : ''}</div>` : '');
 function envelopeHtml(p, opt) {
   const e = S.envelope, co = companyOf(p.company_id);
   const { address, postcode } = splitPostcode(p.destination);
@@ -592,6 +595,7 @@ function envelopeHtml(p, opt) {
   return `<div class="env-page" style="width:${e.env_w}in;height:${e.env_h}in">
     <div class="env-inner" style="transform:translate(${e.env_dx}mm,${e.env_dy}mm)">
       <div class="env-from"><div class="env-label">ผู้ส่ง</div><b>${esc(co.name)}</b><br>${nl(co.address)}${co.phone ? `<br>โทร ${esc(co.phone)}` : ''}</div>
+      ${permitHtml(co)}
       <div class="env-to"><div class="env-label">กรุณาส่ง</div>
         ${showName ? `<div class="env-name">${esc(p.customer)}</div>` : ''}
         <div class="env-addr">${nl(address) || (showName ? '' : esc(p.customer))}</div>
@@ -906,9 +910,9 @@ async function adminPage() {
     <div class="card"><form id="orgForm" class="bar"><label class="grow">ชื่อหน่วยงาน (แสดงหน้าเข้าสู่ระบบและหัวรายงาน)
       <input name="orgName" required value="${esc(S.orgName)}"></label><button class="btn" type="submit">บันทึก</button><div class="err"></div></form></div>
     <div class="card"><div class="bar"><b class="grow">บริษัทผู้ส่ง</b><button class="btn" id="addCo">+ เพิ่มบริษัท</button></div>
-      <div class="tablewrap"><table><tr><th>ชื่อบริษัท</th><th>ที่อยู่ (พิมพ์บนหน้าซองและใบรายการ)</th><th>เบอร์โทร</th><th>สถานะ</th><th></th></tr>
+      <div class="tablewrap"><table><tr><th>ชื่อบริษัท</th><th>ที่อยู่ (พิมพ์บนหน้าซองและใบรายการ)</th><th>เบอร์โทร</th><th>ใบอนุญาต ปณ.</th><th>สถานะ</th><th></th></tr>
         ${S.companies.map((c) => `<tr><td><b>${esc(c.name)}</b></td><td>${esc(c.address).replace(/\n/g, '<br>') || '<span class="err">ยังไม่มีที่อยู่</span>'}</td>
-          <td>${esc(c.phone) || '-'}</td><td>${c.active ? 'ใช้งาน' : '<span class="mute">ปิดใช้งาน</span>'}</td>
+          <td>${esc(c.phone) || '-'}</td><td>${c.permit_no ? `ใบอนุญาตที่ ${esc(c.permit_no)}<div class="mute">${esc(c.permit_office)}</div>` : '<span class="mute">-</span>'}</td><td>${c.active ? 'ใช้งาน' : '<span class="mute">ปิดใช้งาน</span>'}</td>
           <td><button class="btn ghost sm" data-co="${c.id}">แก้ไข</button></td></tr>`).join('')}</table></div>
       <p class="mute">ตอนบันทึกซองเลือกได้ว่าส่งในนามบริษัทไหน · ปิดใช้งานแทนการลบ (ซองเก่ายังแสดงชื่อบริษัทเดิมได้)</p></div>
     ${await envelopeSettingsCard()}
@@ -932,9 +936,20 @@ function companyDialog(c) {
     <label><span>ชื่อบริษัท <b class="req">*</b></span><input name="name" required value="${esc(c?.name)}"></label>
     <label>ที่อยู่ (พิมพ์หลายบรรทัดได้)<textarea name="address" rows="3">${esc(c?.address)}</textarea></label>
     <label>เบอร์โทร<input name="phone" value="${esc(c?.phone)}"></label>
+    <fieldset class="box"><legend>ใบอนุญาตชำระค่าฝากส่งเป็นรายเดือน <span class="mute">(พิมพ์เป็นกรอบมุมขวาบนของหน้าซอง · เว้นว่าง = ไม่พิมพ์)</span></legend>
+      <div class="grid">
+        <label>ใบอนุญาตที่<input name="permit_no" value="${esc(c?.permit_no)}" placeholder="เช่น พิเศษ 3/2559" autocomplete="off"></label>
+        <label>ที่ทำการไปรษณีย์ / รหัส<input name="permit_office" value="${esc(c?.permit_office)}" placeholder="เช่น ปณภ. วารินชำราบ 34190" autocomplete="off"></label>
+      </div>
+      <div class="permit-preview" aria-live="polite"></div>
+    </fieldset>
     ${c ? '<label>สถานะ<select name="active"><option value="1">ใช้งาน</option><option value="">ปิดใช้งาน</option></select></label>' : ''}
     <div class="err"></div><div class="actions"><button type="button" class="btn ghost" data-close>ยกเลิก</button><button class="btn" type="submit">บันทึก</button></div></form>`);
   if (c) $('form', d).elements.active.value = c.active ? '1' : '';
+  const fe = $('form', d).elements, prev = $('.permit-preview', d);
+  const showPermit = () => { prev.innerHTML = permitHtml({ permit_no: fe.permit_no.value.trim(), permit_office: fe.permit_office.value.trim() }); };
+  fe.permit_no.oninput = fe.permit_office.oninput = showPermit;
+  showPermit();
   onSubmit($('form', d), async (v) => {
     if (c) await api(`/api/companies/${c.id}`, { method: 'PUT', body: { ...v, active: !!v.active } });
     else await api('/api/companies', { body: v });

@@ -110,6 +110,10 @@ const ensureReady = () => (ready ??= (async () => {
     // บริษัทผู้ส่ง: ครั้งแรกสร้างบริษัทแรกจากชื่อ/ที่อยู่ผู้ส่งที่ตั้งไว้เดิม แล้วให้ซองเดิมทั้งหมดเป็นของบริษัทนี้
     const pcols = (await db.all(`SELECT name FROM pragma_table_info('parcels')`)).map((c) => c.name);
     if (!pcols.includes('company_id')) await db.run('ALTER TABLE parcels ADD COLUMN company_id INTEGER REFERENCES companies(id)');
+    // ใบอนุญาตชำระค่าฝากส่งเป็นรายเดือน (แต่ละบริษัทเลขไม่เหมือนกัน) พิมพ์เป็นกรอบมุมขวาบนของหน้าซอง
+    const ccols = (await db.all(`SELECT name FROM pragma_table_info('companies')`)).map((c) => c.name);
+    if (!ccols.includes('permit_no')) await db.run(`ALTER TABLE companies ADD COLUMN permit_no TEXT NOT NULL DEFAULT ''`);
+    if (!ccols.includes('permit_office')) await db.run(`ALTER TABLE companies ADD COLUMN permit_office TEXT NOT NULL DEFAULT ''`);
     if (!(await db.get('SELECT 1 FROM companies'))) {
       const name = (await setting('env_sender_name')) || (await setting('org_name')) || 'บริษัทของฉัน';
       await db.run('INSERT INTO companies (name, address) VALUES (?, ?)', name, await setting('env_sender_address'));
@@ -253,7 +257,7 @@ async function envelopeSettings() {
 app.get('/api/state', async (req, res) => {
   const needSetup = (await db.get('SELECT COUNT(*) c FROM users')).c === 0;
   res.json({ needSetup, user: req.user || null, orgName: await setting('org_name'), carriers: CARRIERS, statuses: STATUS_TH,
-    companies: req.user ? await db.all('SELECT id, name, address, phone, active FROM companies ORDER BY id') : [],
+    companies: req.user ? await db.all('SELECT id, name, address, phone, permit_no, permit_office, active FROM companies ORDER BY id') : [],
     envelope: req.user ? await envelopeSettings() : null });
 });
 
@@ -325,21 +329,24 @@ app.put('/api/users/:id', admin, async (req, res) => {
 });
 
 function companyInput(b) {
-  const c = { name: str(b.name, 200), address: str(b.address, 500), phone: str(b.phone, 100), active: b.active === undefined || b.active === true || b.active === '1' ? 1 : 0 };
+  const c = { name: str(b.name, 200), address: str(b.address, 500), phone: str(b.phone, 100),
+    permit_no: str(b.permit_no, 100), permit_office: str(b.permit_office, 200), active: b.active === undefined || b.active === true || b.active === '1' ? 1 : 0 };
   if (!c.name) fail(400, 'กรอกชื่อบริษัท');
   return c;
 }
 app.post('/api/companies', admin, async (req, res) => {
   const c = companyInput(req.body);
   if (await db.get('SELECT 1 FROM companies WHERE name = ?', c.name)) fail(400, `มีบริษัท "${c.name}" แล้ว`);
-  const r = await db.run('INSERT INTO companies (name, address, phone, active) VALUES (?, ?, ?, ?)', c.name, c.address, c.phone, c.active);
+  const r = await db.run('INSERT INTO companies (name, address, phone, permit_no, permit_office, active) VALUES (?, ?, ?, ?, ?, ?)',
+    c.name, c.address, c.phone, c.permit_no, c.permit_office, c.active);
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 app.put('/api/companies/:id', admin, async (req, res) => {
   const id = Number(req.params.id), c = companyInput(req.body);
   if (await db.get('SELECT 1 FROM companies WHERE name = ? AND id <> ?', c.name, id)) fail(400, `มีบริษัท "${c.name}" แล้ว`);
   if (!c.active && !(await db.get('SELECT 1 FROM companies WHERE active = 1 AND id <> ?', id))) fail(400, 'ต้องมีบริษัทที่เปิดใช้งานอย่างน้อย 1 บริษัท');
-  const r = await db.run('UPDATE companies SET name = ?, address = ?, phone = ?, active = ? WHERE id = ?', c.name, c.address, c.phone, c.active, id);
+  const r = await db.run('UPDATE companies SET name = ?, address = ?, phone = ?, permit_no = ?, permit_office = ?, active = ? WHERE id = ?',
+    c.name, c.address, c.phone, c.permit_no, c.permit_office, c.active, id);
   if (!r.changes) fail(404, 'ไม่พบบริษัท');
   res.json({ ok: true });
 });
