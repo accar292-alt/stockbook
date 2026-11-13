@@ -65,7 +65,9 @@ const SCHEMA = `
     id INTEGER PRIMARY KEY, parcel_id INTEGER NOT NULL REFERENCES parcels(id),
     receipt_no TEXT NOT NULL,              -- เลขที่ใบเสร็จ
     bill_date TEXT NOT NULL,               -- วันที่ตัดบิล YYYY-MM-DD
-    customer TEXT NOT NULL DEFAULT ''      -- ชื่อลูกค้าของใบเสร็จ (ว่าง = เหมือนลูกค้าผู้รับซอง)
+    customer TEXT NOT NULL DEFAULT '',     -- ชื่อลูกค้าของใบเสร็จ (ว่าง = เหมือนลูกค้าผู้รับซอง)
+    amount INTEGER,                        -- ยอดเงิน หน่วยสตางค์ (NULL = ไม่ระบุ)
+    detail TEXT NOT NULL DEFAULT ''        -- รายละเอียดสินค้า
   );
   CREATE INDEX IF NOT EXISTS idx_pr_parcel ON parcel_receipts(parcel_id);
   CREATE INDEX IF NOT EXISTS idx_pr_receipt ON parcel_receipts(receipt_no);
@@ -88,6 +90,8 @@ const ensureReady = () => (ready ??= (async () => {
     // ฐานข้อมูลรุ่นก่อนยังไม่มีชื่อลูกค้ารายใบเสร็จ
     const cols = (await db.all(`SELECT name FROM pragma_table_info('parcel_receipts')`)).map((c) => c.name);
     if (!cols.includes('customer')) await db.run(`ALTER TABLE parcel_receipts ADD COLUMN customer TEXT NOT NULL DEFAULT ''`);
+    if (!cols.includes('amount')) await db.run('ALTER TABLE parcel_receipts ADD COLUMN amount INTEGER');
+    if (!cols.includes('detail')) await db.run(`ALTER TABLE parcel_receipts ADD COLUMN detail TEXT NOT NULL DEFAULT ''`);
   }
   catch (e) { throw new HttpError(500, `เชื่อมต่อฐานข้อมูลไม่ได้: ${e.message}`); }
 })().catch((e) => { ready = null; throw e; }));
@@ -116,6 +120,15 @@ const STATUS_TH = { pending: 'รอส่ง', sent: 'ส่งแล้ว', r
 const CARRIERS = ['ไปรษณีย์ไทย (EMS)', 'ไปรษณีย์ไทย (ลงทะเบียน)', 'Kerry Express', 'Flash Express', 'J&T Express', 'ส่งเอง/แมสเซนเจอร์', 'อีเมล', 'อื่น ๆ'];
 
 const normTracking = (v) => str(v, 60).toUpperCase().replace(/\s+/g, '');
+// ยอดเงิน: รับ "1,234.50", 1234.5, "1234 บาท" → สตางค์ (จำนวนเต็ม); ว่าง = null; อ่านไม่ได้ = undefined
+function parseAmount(v) {
+  if (v === '' || v == null) return null;
+  const n = typeof v === 'number' ? v : Number(String(v).replace(/[,\s฿]|บาท/g, ''));
+  if (String(v).trim() === '') return null;
+  if (!Number.isFinite(n) || n < 0 || n > 1e10) return undefined;
+  return Math.round(n * 100);
+}
+const baht = (satang) => (satang == null ? null : satang / 100);
 const PARCEL_FIELDS = ['customer', 'destination', 'sent_date', 'carrier', 'tracking_no', 'status', 'note'];
 
 // ตรวจข้อมูลซอง + รายการใบเสร็จในซอง
@@ -137,14 +150,16 @@ function parcelInput(body) {
   for (const r of list) {
     const receipt_no = str(r?.receipt_no, 60), bill_date = str(r?.bill_date, 10);
     let customer = str(r?.customer, 200);
-    if (!receipt_no && !bill_date && !customer) continue; // แถวว่างในฟอร์ม
+    const amount = parseAmount(r?.amount), detail = str(r?.detail, 500);
+    if (!receipt_no && !bill_date && !customer && amount == null && !detail) continue; // แถวว่างในฟอร์ม
     if (customer === p.customer) customer = ''; // เหมือนผู้รับซอง ไม่ต้องเก็บซ้ำ
     if (!receipt_no) fail(400, 'มีแถวที่ไม่ได้กรอกเลขที่ใบเสร็จ');
     if (!isDate(bill_date)) fail(400, `ใบเสร็จ ${receipt_no}: กรอกวันที่ตัดบิลให้ถูกต้อง`);
     if (seen.has(receipt_no)) fail(400, `ใบเสร็จ ${receipt_no} ซ้ำในซองนี้`);
     if (p.sent_date && p.sent_date < bill_date) fail(400, `ใบเสร็จ ${receipt_no} ตัดบิลหลังวันที่ส่ง`);
     seen.add(receipt_no);
-    p.receipts.push({ receipt_no, bill_date, customer });
+    if (amount === undefined) fail(400, `ใบเสร็จ ${receipt_no}: ยอดเงิน "${r.amount}" ไม่ถูกต้อง`);
+    p.receipts.push({ receipt_no, bill_date, customer, amount, detail });
   }
   if (!p.receipts.length) fail(400, 'ใส่ใบเสร็จในซองอย่างน้อย 1 ใบ');
   // สถานะ: ถ้าไม่ระบุ ให้คำนวณจากวันที่ส่ง; ถ้ามีวันที่ส่งแล้วจะเป็น "รอส่ง" ไม่ได้
@@ -154,7 +169,7 @@ function parcelInput(body) {
   p.status = status;
   return p;
 }
-const receiptsText = (list) => list.map((r) => `${r.receipt_no} (${r.bill_date}${r.customer ? `, ${r.customer}` : ''})`).join(', ');
+const receiptsText = (list) => list.map((r) => `${r.receipt_no} (${r.bill_date}${r.customer ? `, ${r.customer}` : ''}${r.amount != null ? `, ${(r.amount / 100).toFixed(2)} บาท` : ''}${r.detail ? `, ${r.detail}` : ''})`).join(', ');
 
 // ---------- app ----------
 const app = express();
@@ -310,8 +325,8 @@ function listFilter(q) {
     const like = `%${text.replace(/[%_\\]/g, '\\$&')}%`;
     const cols = ['p.customer', 'p.tracking_no', 'p.destination', 'p.note'];
     where.push(`(${cols.map((c) => `${c} LIKE ? ESCAPE '\\'`).join(' OR ')}
-      OR EXISTS (SELECT 1 FROM parcel_receipts r WHERE r.parcel_id = p.id AND (r.receipt_no LIKE ? ESCAPE '\\' OR r.customer LIKE ? ESCAPE '\\')))`);
-    for (let i = 0; i <= cols.length + 1; i++) args.push(like);
+      OR EXISTS (SELECT 1 FROM parcel_receipts r WHERE r.parcel_id = p.id AND (r.receipt_no LIKE ? ESCAPE '\\' OR r.customer LIKE ? ESCAPE '\\' OR r.detail LIKE ? ESCAPE '\\')))`);
+    for (let i = 0; i <= cols.length + 2; i++) args.push(like);
   }
   if (STATUSES.includes(q.status)) { where.push('p.status = ?'); args.push(q.status); }
   if (q.by === 'sent') {
@@ -327,19 +342,21 @@ function listFilter(q) {
 }
 const ORDER = `ORDER BY CASE p.status WHEN 'pending' THEN 0 ELSE 1 END, COALESCE(NULLIF(p.sent_date, ''), p.created_at) DESC, p.id DESC`;
 
+// ส่งยอดเงินออกทาง API เป็นบาท (ฐานข้อมูลเก็บเป็นสตางค์)
+const toBaht = (parcels) => { for (const p of parcels) for (const r of p.receipts) r.amount = baht(r.amount); return parcels; };
 async function withReceipts(parcels) {
   if (!parcels.length) return parcels;
-  const rs = await db.all(`SELECT parcel_id, receipt_no, bill_date, customer FROM parcel_receipts
+  const rs = await db.all(`SELECT parcel_id, receipt_no, bill_date, customer, amount, detail FROM parcel_receipts
     WHERE parcel_id IN (${parcels.map(() => '?').join(',')}) ORDER BY id`, ...parcels.map((p) => p.id));
   const by = new Map(parcels.map((p) => [p.id, (p.receipts = [])]));
-  for (const r of rs) by.get(r.parcel_id).push({ receipt_no: r.receipt_no, bill_date: r.bill_date, customer: r.customer });
+  for (const r of rs) by.get(r.parcel_id).push({ receipt_no: r.receipt_no, bill_date: r.bill_date, customer: r.customer, amount: r.amount, detail: r.detail });
   return parcels;
 }
 
 app.get('/api/parcels', auth, async (req, res) => {
   const f = listFilter(req.query);
   const limit = Math.min(Math.max(Number(req.query.limit) || 300, 1), 2000);
-  const rows = await withReceipts(await db.all(`SELECT ${PARCEL_COLS} ${PARCEL_FROM} WHERE ${f.sql} ${ORDER} LIMIT ${limit}`, ...f.args));
+  const rows = toBaht(await withReceipts(await db.all(`SELECT ${PARCEL_COLS} ${PARCEL_FROM} WHERE ${f.sql} ${ORDER} LIMIT ${limit}`, ...f.args)));
   const totals = await db.all(`SELECT p.status, COUNT(*) c, SUM((SELECT COUNT(*) FROM parcel_receipts r WHERE r.parcel_id = p.id)) n
     FROM parcels p WHERE ${f.sql} GROUP BY p.status`, ...f.args);
   res.json({ rows, totals: Object.fromEntries(totals.map((t) => [t.status, { parcels: t.c, receipts: t.n }])) });
@@ -348,7 +365,7 @@ app.get('/api/parcels', auth, async (req, res) => {
 app.get('/api/parcels/:id', auth, async (req, res) => {
   const p = await db.get(`SELECT ${PARCEL_COLS} ${PARCEL_FROM} WHERE p.id = ? AND p.deleted = 0`, Number(req.params.id));
   if (!p) fail(404, 'ไม่พบรายการ');
-  await withReceipts([p]);
+  toBaht(await withReceipts([p]));
   p.edits = await db.all(`SELECT e.edited_at, e.before, u.name FROM parcel_edits e JOIN users u ON u.id = e.edited_by
                           WHERE e.parcel_id = ? ORDER BY e.id DESC`, p.id);
   res.json(p);
@@ -371,8 +388,8 @@ app.get('/api/customers', auth, async (req, res) => {
     WHERE id IN (SELECT MAX(id) FROM parcels WHERE deleted = 0 GROUP BY customer) ORDER BY customer`));
 });
 
-const insertReceipts = (id, list) => list.map((r) => ({ sql: 'INSERT INTO parcel_receipts (parcel_id, receipt_no, bill_date, customer) VALUES (?, ?, ?, ?)',
-  args: [id, r.receipt_no, r.bill_date, r.customer || ''] }));
+const insertReceipts = (id, list) => list.map((r) => ({ sql: 'INSERT INTO parcel_receipts (parcel_id, receipt_no, bill_date, customer, amount, detail) VALUES (?, ?, ?, ?, ?, ?)',
+  args: [id, r.receipt_no, r.bill_date, r.customer || '', r.amount ?? null, r.detail || ''] }));
 const INSERT_PARCEL = `INSERT INTO parcels (customer, destination, sent_date, carrier, tracking_no, status, note, created_by, created_at)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 const parcelArgs = (p) => [p.customer, p.destination, p.sent_date, p.carrier, p.tracking_no, p.status, p.note];
@@ -411,7 +428,9 @@ app.put('/api/parcels/:id', auth, async (req, res) => {
   const old = await db.get('SELECT * FROM parcels WHERE id = ? AND deleted = 0', Number(req.params.id));
   if (!old) fail(404, 'ไม่พบรายการ');
   await withReceipts([old]);
-  const stmts = updateStatements(old, parcelInput({ ...old, ...req.body }), req.user.id, now());
+  const body = { ...old, ...req.body };
+  if (!req.body.receipts) body.receipts = old.receipts.map((r) => ({ ...r, amount: baht(r.amount) }));
+  const stmts = updateStatements(old, parcelInput(body), req.user.id, now());
   if (!stmts.length) return res.json({ ok: true, unchanged: true });
   await client.batch(stmts, 'write');
   res.json({ ok: true });
@@ -439,6 +458,8 @@ const IMPORT_COLS = {
   tracking_no: ['เลขพัสดุ', 'เลขที่พัสดุ', 'เลขแทรค', 'เลขติดตาม', 'trackingno', 'tracking'],
   status: ['สถานะ', 'status'],
   note: ['หมายเหตุ', 'note', 'remark'],
+  detail: ['รายละเอียดสินค้า', 'รายการสินค้า', 'รายละเอียด', 'สินค้า', 'description', 'product'],
+  amount: ['ยอดเงิน', 'จำนวนเงิน', 'ยอดรวม', 'ยอดชำระ', 'เงิน', 'amount', 'total'],
 };
 const normHead = (s) => String(s ?? '').toLowerCase().replace(/[\s._\-/()*:]/g, '');
 const ALIASES = Object.entries(IMPORT_COLS).flatMap(([k, list]) => list.map((a) => [k, normHead(a)])).sort((a, b) => b[1].length - a[1].length);
@@ -478,12 +499,12 @@ STATUS_FROM_TH[normHead('ได้รับแล้ว')] = 'received';
 app.get('/api/import-template.xlsx', auth, (req, res) => {
   const addr = '99/1 ถ.สุขุมวิท แขวงคลองเตย เขตคลองเตย กรุงเทพฯ 10110';
   const ws = XLSX.utils.aoa_to_sheet([
-    ['เลขที่ใบเสร็จ', 'วันที่ตัดบิล', 'ชื่อลูกค้า', 'วันที่ส่ง', 'ส่งไปที่', 'ส่งทาง', 'เลขพัสดุ', 'หมายเหตุ'],
-    ['RC0001', '01/11/2569', 'บริษัท ตัวอย่าง จำกัด', '05/11/2569', addr, 'ไปรษณีย์ไทย (EMS)', 'EF123456789TH', 'ใบเสร็จที่เลขพัสดุเดียวกัน = ซองเดียวกัน'],
-    ['RC0002', '01/11/2569', 'บริษัท ตัวอย่าง จำกัด', '05/11/2569', addr, 'ไปรษณีย์ไทย (EMS)', 'EF123456789TH', ''],
-    ['RC0003', '03/11/2569', 'ร้านตัวอย่าง', '', '', '', '', 'ยังไม่ส่ง เว้นวันที่ส่งไว้'],
+    ['เลขที่ใบเสร็จ', 'วันที่ตัดบิล', 'ชื่อลูกค้า', 'รายละเอียดสินค้า', 'ยอดเงิน', 'วันที่ส่ง', 'ส่งไปที่', 'ส่งทาง', 'เลขพัสดุ', 'หมายเหตุ'],
+    ['RC0001', '01/11/2569', 'บริษัท ตัวอย่าง จำกัด', 'หนังสือเรียน ป.1 จำนวน 50 เล่ม', 12500, '05/11/2569', addr, 'ไปรษณีย์ไทย (EMS)', 'EF123456789TH', 'ใบเสร็จที่เลขพัสดุเดียวกัน = ซองเดียวกัน'],
+    ['RC0002', '01/11/2569', 'บริษัท ตัวอย่าง จำกัด', 'แบบฝึกหัด ป.2', 3480.5, '05/11/2569', addr, 'ไปรษณีย์ไทย (EMS)', 'EF123456789TH', ''],
+    ['RC0003', '03/11/2569', 'ร้านตัวอย่าง', '', 990, '', '', '', '', 'ยังไม่ส่ง เว้นวันที่ส่งไว้'],
   ]);
-  ws['!cols'] = [16, 14, 30, 14, 44, 20, 18, 36].map((wch) => ({ wch }));
+  ws['!cols'] = [16, 14, 30, 34, 14, 14, 44, 20, 18, 36].map((wch) => ({ wch }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'ใบเสร็จ');
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -537,6 +558,8 @@ app.post('/api/import', auth, async (req, res) => {
       }
       for (const k of ['customer', 'destination', 'carrier', 'note']) { const s = str(get(k), 500); if (s) v[k] = s; }
       const tn = normTracking(get('tracking_no')); if (tn) v.tracking_no = tn;
+      const amt = parseAmount(get('amount'));
+      if (amt === undefined) fail(400, `ยอดเงิน "${get('amount')}" อ่านไม่ได้`);
       const st = normHead(get('status'));
       if (st) { if (!STATUS_FROM_TH[st]) fail(400, `สถานะ "${get('status')}" ไม่รู้จัก`); v.status = STATUS_FROM_TH[st]; }
       const old = byReceipt.get(receipt_no);
@@ -546,6 +569,8 @@ app.post('/api/import', auth, async (req, res) => {
         const u = updates.get(old.id) || { old, v: {}, lines: [], bills: {} };
         Object.assign(u.v, Object.fromEntries(Object.entries(v).filter(([k]) => k !== 'bill_date')));
         if (v.bill_date) u.bills[receipt_no] = v.bill_date;
+        if (amt != null) (u.amounts ||= {})[receipt_no] = amt;
+        if (str(get('detail'))) (u.details ||= {})[receipt_no] = str(get('detail'), 500);
         u.lines.push(line);
         updates.set(old.id, u);
         continue;
@@ -556,7 +581,7 @@ app.post('/api/import', auth, async (req, res) => {
       const key = v.tracking_no ? `T|${v.tracking_no}` : `C|${v.customer}|${v.sent_date || ''}|${v.destination || ''}|${v.carrier || ''}`;
       const g = groups.get(key) || { v: { ...v }, receipts: [], lines: [] };
       for (const k of ['destination', 'carrier', 'note', 'sent_date', 'status']) if (!g.v[k] && v[k]) g.v[k] = v[k];
-      g.receipts.push({ receipt_no, bill_date: v.bill_date, customer: v.customer });
+      g.receipts.push({ receipt_no, bill_date: v.bill_date, customer: v.customer, amount: amt, detail: str(get('detail'), 500) });
       g.lines.push(line);
       groups.set(key, g);
     } catch (e) {
@@ -566,13 +591,14 @@ app.post('/api/import', auth, async (req, res) => {
   }
   const creates = [], edits = [];
   for (const g of groups.values()) {
-    try { creates.push({ p: parcelInput({ ...g.v, receipts: g.receipts }), lines: g.lines }); }
+    try { creates.push({ p: parcelInput({ ...g.v, receipts: g.receipts.map((r) => ({ ...r, amount: baht(r.amount) })) }), lines: g.lines }); }
     catch (e) { if (!(e instanceof HttpError)) throw e; errors.push({ line: g.lines[0], receipt_no: g.receipts.map((r) => r.receipt_no).join(', '), msg: e.message }); }
   }
   for (const u of updates.values()) {
     try {
-      const receipts = u.old.receipts.map((r) => ({ ...r, bill_date: u.bills[r.receipt_no] || r.bill_date }));
-      const p = parcelInput({ ...u.old, ...u.v, status: u.v.status || u.old.status, receipts });
+      const receipts = u.old.receipts.map((r) => ({ ...r, bill_date: u.bills[r.receipt_no] || r.bill_date,
+        amount: u.amounts?.[r.receipt_no] ?? r.amount, detail: u.details?.[r.receipt_no] ?? r.detail }));
+      const p = parcelInput({ ...u.old, ...u.v, status: u.v.status || u.old.status, receipts: receipts.map((r) => ({ ...r, amount: baht(r.amount) })) });
       if (updateStatements(u.old, p, 0, '').length) edits.push({ old: u.old, p, lines: u.lines }); else skipped += u.lines.length;
     } catch (e) { if (!(e instanceof HttpError)) throw e; errors.push({ line: u.lines[0], msg: `ซองของ ${u.old.customer}: ${e.message}` }); }
   }
@@ -580,7 +606,8 @@ app.post('/api/import', auth, async (req, res) => {
   const summary = {
     sheet: sheetName, createParcels: creates.length, createReceipts: creates.reduce((n, c) => n + c.p.receipts.length, 0),
     updateParcels: edits.length, skipped, errors: errors.slice(0, 200), errorCount: errors.length,
-    preview: [...creates.map((c) => ({ action: 'create', ...c.p })), ...edits.map((e) => ({ action: 'update', ...e.p }))].slice(0, 50),
+    preview: toBaht([...creates.map((c) => ({ action: 'create', ...c.p })), ...edits.map((e) => ({ action: 'update', ...e.p }))].slice(0, 50)
+      .map((x) => ({ ...x, receipts: x.receipts.map((r) => ({ ...r })) }))),
   };
   if (!req.body.commit) return res.json(summary);
   if (!creates.length && !edits.length) fail(400, 'ไม่มีรายการให้นำเข้า');
@@ -604,11 +631,12 @@ const thDate = (d) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${Number(d.slice(
 app.get('/api/export.xlsx', auth, async (req, res) => {
   const f = listFilter(req.query);
   const rows = await withReceipts(await db.all(`SELECT ${PARCEL_COLS} ${PARCEL_FROM} WHERE ${f.sql} ${ORDER}`, ...f.args));
-  const aoa = [['ซองที่', 'เลขที่ใบเสร็จ', 'ชื่อลูกค้า', 'วันที่ตัดบิล', 'ส่งถึง', 'วันที่ส่ง', 'ส่งไปที่', 'ส่งทาง', 'เลขพัสดุ', 'สถานะ', 'หมายเหตุ', 'ผู้บันทึก']];
+  const aoa = [['ซองที่', 'เลขที่ใบเสร็จ', 'ชื่อลูกค้า', 'วันที่ตัดบิล', 'ยอดเงิน', 'รายละเอียดสินค้า', 'ส่งถึง', 'วันที่ส่ง', 'ส่งไปที่', 'ส่งทาง', 'เลขพัสดุ', 'สถานะ', 'หมายเหตุ', 'ผู้บันทึก']];
   for (const p of rows) for (const r of p.receipts)
-    aoa.push([p.id, r.receipt_no, r.customer || p.customer, thDate(r.bill_date), p.customer, thDate(p.sent_date), p.destination, p.carrier, p.tracking_no, STATUS_TH[p.status], p.note, p.created_name]);
+    aoa.push([p.id, r.receipt_no, r.customer || p.customer, thDate(r.bill_date), r.amount == null ? '' : r.amount / 100, r.detail, p.customer, thDate(p.sent_date), p.destination, p.carrier, p.tracking_no, STATUS_TH[p.status], p.note, p.created_name]);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [7, 16, 32, 12, 32, 12, 50, 22, 18, 16, 30, 18].map((wch) => ({ wch }));
+  ws['!cols'] = [7, 16, 32, 12, 14, 36, 32, 12, 50, 22, 18, 16, 30, 18].map((wch) => ({ wch }));
+  for (let i = 1; i < aoa.length; i++) { const c = ws[XLSX.utils.encode_cell({ r: i, c: 4 })]; if (c && c.t === 'n') c.z = '#,##0.00'; }
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'การส่งใบเสร็จ');
   const name = `receipt-mail_${new Date().toISOString().slice(0, 10)}.xlsx`;
