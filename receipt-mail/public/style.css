@@ -166,3 +166,5 @@ table.rtable th.num { text-align: right; }
 .slip-list th:nth-child(2), .slip-list td:nth-child(2) { width: 15%; }
 .slip-list .nowrap { white-space: nowrap; }
 .slip-list .num { width: 17%; }
+.saved-card { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--t-ok, #e3f4e8); border-color: #b7dfc4; }
+.saved-card .grow { flex: 1; min-width: 220px; }

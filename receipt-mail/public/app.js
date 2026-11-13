@@ -263,26 +263,48 @@ const parcelBody = (form, v) => ({ ...v, receipts: formReceipts(form) });
 
 // ---------- new ----------
 let savedThisRound = []; // ซองที่บันทึกในรอบนี้ (ล้างเมื่อไปหน้ารายการ)
+const fetchParcels = (ids) => Promise.all(ids.map((id) => api(`/api/parcels/${id}`)));
 function newPage() {
+  const last = savedThisRound[0];
+  const allIds = savedThisRound.map((x) => x.id).join(',');
   $('#main').innerHTML = `<h2>บันทึกซองใหม่</h2>
+    ${last ? `<div class="card saved-card" role="status">
+      <div class="grow"><b>✓ บันทึกซองของ ${esc(last.customer)} แล้ว</b>
+        <div class="mute">${last.receipts.length} ใบ: ${esc(last.receipts.map((r) => r.receipt_no).join(', '))}</div></div>
+      <button type="button" class="btn" data-print="env" data-ids="${last.id}">พิมพ์หน้าซอง</button>
+      <button type="button" class="btn" data-print="slip" data-ids="${last.id}">พิมพ์ใบรายการใบเสร็จ</button></div>` : ''}
     <p class="mute">1 ซอง = พัสดุ 1 ชิ้นที่ส่งให้ลูกค้า ใส่ใบเสร็จทุกใบที่อยู่ในซองนั้น แล้วกรอกข้อมูลการส่งครั้งเดียว</p>
     <div class="card"><form>${parcelFields()}
       <div class="err"></div><div class="actions"><button class="btn" type="submit">บันทึกซอง</button></div></form></div>
-    ${savedThisRound.length ? `<div class="card"><b>บันทึกแล้วในรอบนี้ ${savedThisRound.length} ซอง</b>
-      <div class="tablewrap"><table><tr><th>ลูกค้า</th><th>ใบเสร็จ</th><th>วันที่ส่ง</th><th>เลขพัสดุ</th></tr>
+    ${savedThisRound.length ? `<div class="card"><div class="bar"><b class="grow">บันทึกแล้วในรอบนี้ ${savedThisRound.length} ซอง</b>
+      ${savedThisRound.length > 1 ? `<button type="button" class="btn ghost sm" data-print="env" data-ids="${allIds}">พิมพ์หน้าซองทั้งหมด</button>
+        <button type="button" class="btn ghost sm" data-print="slip" data-ids="${allIds}">พิมพ์ใบรายการทั้งหมด</button>` : ''}</div>
+      <div class="tablewrap"><table><tr><th>ลูกค้า</th><th>ใบเสร็จ</th><th>วันที่ส่ง</th><th>เลขพัสดุ</th><th>พิมพ์</th></tr>
       ${savedThisRound.map((s) => `<tr><td>${esc(s.customer)}</td><td>${s.receipts.length} ใบ <span class="mute">${esc(s.receipts.map((r) => r.receipt_no).join(', '))}</span></td>
-        <td class="nowrap">${thDate(s.sent_date) || '<span class="mute">ยังไม่ส่ง</span>'}</td><td class="track">${esc(String(s.tracking_no || '').toUpperCase())}</td></tr>`).join('')}
+        <td class="nowrap">${thDate(s.sent_date) || '<span class="mute">ยังไม่ส่ง</span>'}</td><td class="track">${esc(String(s.tracking_no || '').toUpperCase())}</td>
+        <td class="nowrap"><button type="button" class="btn ghost sm" data-print="env" data-ids="${s.id}">หน้าซอง</button>
+          <button type="button" class="btn ghost sm" data-print="slip" data-ids="${s.id}">ใบรายการ</button></td></tr>`).join('')}
       </table></div></div>` : ''}`;
+  // ปุ่มพิมพ์: โหลดข้อมูลซองจากระบบ แล้วเปิดหน้าต่างตัวอย่างก่อนพิมพ์
+  $$('#main [data-print]').forEach((btn) => (btn.onclick = async () => {
+    btn.disabled = true;
+    try {
+      const parcels = await fetchParcels(btn.dataset.ids.split(',').map(Number));
+      (btn.dataset.print === 'env' ? envelopeDialog : slipDialog)(parcels);
+    } catch (e) { toast(e.message, true); }
+    finally { btn.disabled = false; }
+  }));
   const form = $('#main form');
   wireParcelForm(form);
-  $('.r-no', form).focus();
+  if (!last) $('.r-no', form).focus();
   onSubmit(form, async (v) => {
     const body = parcelBody(form, v);
-    await api('/api/parcels', { body });
-    savedThisRound.unshift(body);
+    const r = await api('/api/parcels', { body });
+    savedThisRound.unshift({ ...body, id: r.id });
     toast(`บันทึกซองของ ${body.customer} แล้ว (${body.receipts.length} ใบ)`);
     loadCustomers(true);
     newPage();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   });
 }
 
