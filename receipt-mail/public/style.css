@@ -199,3 +199,6 @@ details.rcpts summary { cursor: pointer; color: var(--info); font-size: .85em; w
 details.rcpts summary:hover { text-decoration: underline; }
 details.rcpts[open] summary { margin-bottom: 2px; }
 @media print { details.rcpts summary { color: inherit; } }
+.company-pick { max-width: 460px; margin-bottom: 10px; }
+.company-pick select { font-weight: 600; }
+.co-tag { font-size: .75em; color: var(--pri); font-weight: 600; }

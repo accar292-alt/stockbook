@@ -80,7 +80,17 @@ function enhanceDate(real) {
 new MutationObserver(() => $$('input[type=date]:not([data-th])').forEach(enhanceDate))
   .observe(document.documentElement, { childList: true, subtree: true });
 
-let S = { user: null, orgName: '', carriers: [], statuses: {} };
+let S = { user: null, orgName: '', carriers: [], statuses: {}, companies: [] };
+// บริษัทผู้ส่ง
+const companyOf = (id) => S.companies.find((c) => c.id === Number(id)) || { name: '', address: '', phone: '' };
+const multiCompany = () => S.companies.length > 1;
+function lastCompanyId() {
+  let id = 0;
+  try { id = Number(localStorage.getItem('last-company')) || 0; } catch {}
+  return S.companies.some((c) => c.id === id && c.active) ? id : S.companies.find((c) => c.active)?.id || 0;
+}
+const companyOptions = (selected) => S.companies.filter((c) => c.active || c.id === Number(selected))
+  .map((c) => `<option value="${c.id}" ${c.id === Number(selected) ? 'selected' : ''}>${esc(c.name)}${c.active ? '' : ' (ปิดใช้งาน)'}</option>`).join('');
 const isAdmin = () => S.user?.role === 'admin';
 
 async function api(url, opts = {}) {
@@ -225,6 +235,8 @@ function parcelFields(p = {}) {
       <div class="dup" hidden></div>
     </fieldset>
     <fieldset class="box"><legend>การส่ง</legend>
+      <label class="company-pick"><span>ส่งในนามบริษัท <b class="req">*</b></span>
+        <select name="company_id" required>${companyOptions(p.company_id || lastCompanyId())}</select></label>
       <div class="grid">
         <label class="span2"><span>ส่งถึง (ชื่อลูกค้าผู้รับ) <b class="req">*</b></span><input name="customer" required list="custList" value="${esc(p.customer)}" autocomplete="off"></label>
         <label><span>วันที่ส่ง <span class="mute">(ว่าง = ยังไม่ส่ง)</span></span><input name="sent_date" type="date" value="${esc(p.sent_date)}"></label>
@@ -399,6 +411,7 @@ function newPage() {
   onSubmit(form, async (v) => {
     const body = parcelBody(form, v);
     const r = await api('/api/parcels', { body });
+    try { localStorage.setItem('last-company', body.company_id); } catch {}
     savedThisRound.unshift({ ...body, id: r.id });
     toast(`บันทึกซองของ ${body.customer} แล้ว (${body.receipts.length} ใบ)`);
     loadCustomers(true);
@@ -408,7 +421,7 @@ function newPage() {
 }
 
 // ---------- list ----------
-const F = { q: '', status: '', by: 'bill', from: '', to: '' };
+const F = { q: '', status: '', by: 'bill', from: '', to: '', company: '' };
 function listPage() {
   savedThisRound = [];
   $('#main').innerHTML = `<h2>รายการซองที่ส่ง</h2>
@@ -416,6 +429,7 @@ function listPage() {
     <div class="card">
       <div class="bar">
         <label class="grow">ค้นหา (เลขใบเสร็จ / ลูกค้า / เลขพัสดุ / ที่อยู่)<input id="fq" type="search" value="${esc(F.q)}"></label>
+        ${multiCompany() ? `<label>บริษัทผู้ส่ง<select id="fco"><option value="">ทุกบริษัท</option>${S.companies.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>` : ''}
         <label>ช่วงวันที่ของ<select id="fby"><option value="bill">วันที่ตัดบิล</option><option value="sent">วันที่ส่ง</option></select></label>
         <label>ตั้งแต่<input id="ffrom" type="date" value="${F.from}"></label>
         <label>ถึง<input id="fto" type="date" value="${F.to}"></label>
@@ -431,10 +445,11 @@ function listPage() {
       <div class="tablewrap" id="tbl"><p class="mute">กำลังโหลด…</p></div>
     </div>`;
   $('#fby').value = F.by;
+  if ($('#fco')) { $('#fco').value = F.company; $('#fco').onchange = () => { F.company = $('#fco').value; load(); }; }
   let t;
   $('#fq').oninput = () => { clearTimeout(t); t = setTimeout(() => { F.q = $('#fq').value; load(); }, 250); };
   for (const [id, k] of [['#fby', 'by'], ['#ffrom', 'from'], ['#fto', 'to']]) $(id).onchange = () => { F[k] = $(id).value; load(); };
-  $('#fclear').onclick = () => { Object.assign(F, { q: '', status: '', by: 'bill', from: '', to: '' }); listPage(); };
+  $('#fclear').onclick = () => { Object.assign(F, { q: '', status: '', by: 'bill', from: '', to: '', company: '' }); listPage(); };
   $('#fprint').onclick = () => window.print();
   $('#fxlsx').onclick = () => (location.href = '/api/export.xlsx?' + new URLSearchParams(F));
   $('#fimport').onclick = importDialog;
@@ -470,13 +485,13 @@ async function load() {
   $$('#stats .stat').forEach((b) => (b.onclick = () => { F.status = F.status === b.dataset.st ? '' : b.dataset.st; load(); }));
   const by = F.by === 'sent' ? 'วันที่ส่ง' : 'วันที่ตัดบิล';
   $('#printNote').textContent = [F.from || F.to ? `${by} ${thDate(F.from) || '…'} – ${thDate(F.to) || '…'}` : '',
-    F.status ? `สถานะ: ${S.statuses[F.status]}` : '', F.q ? `ค้นหา: ${F.q}` : '', `(${rows.length} ซอง)`].filter(Boolean).join(' · ');
+    F.company ? `บริษัท: ${companyOf(F.company).name}` : '', F.status ? `สถานะ: ${S.statuses[F.status]}` : '', F.q ? `ค้นหา: ${F.q}` : '', `(${rows.length} ซอง)`].filter(Boolean).join(' · ');
   if (!rows.length) { $('#tbl').innerHTML = '<p class="mute">ไม่พบรายการ</p>'; selChanged(); return; }
   $('#tbl').innerHTML = `<table class="ships"><thead><tr>
       <th class="noprint pickcell"><input type="checkbox" id="pickAll" title="เลือกทั้งหมด" aria-label="เลือกทั้งหมด"></th><th>ลูกค้า / ใบเสร็จในซอง</th><th>วันที่ส่ง</th><th>ส่งไปที่</th><th>ส่งทาง</th><th>เลขพัสดุ</th><th>สถานะ</th></tr></thead>
     <tbody>${rows.map((p) => `<tr class="click ${p.status}" data-id="${p.id}">
       <td class="noprint pickcell"><input type="checkbox" class="pick" value="${p.id}" aria-label="เลือกซอง ${esc(p.customer)}"></td>
-      <td class="cust"><b>${esc(p.customer)}</b> <span class="count">${p.receipts.length} ใบ${sumAmount(p.receipts) != null ? ` · ${money(sumAmount(p.receipts))} บาท` : ''}</span>${p.edit_count
+      <td class="cust">${multiCompany() ? `<div class="co-tag">${esc(companyOf(p.company_id).name)}</div>` : ''}<b>${esc(p.customer)}</b> <span class="count">${p.receipts.length} ใบ${sumAmount(p.receipts) != null ? ` · ${money(sumAmount(p.receipts))} บาท` : ''}</span>${p.edit_count
         ? ` <span class="edited" title="แก้ล่าสุดโดย ${esc(p.updated_name)} ${thTime(p.updated_at)}">✎ แก้ไข ${p.edit_count} ครั้ง</span>` : ''}${receiptChips(p)}${p.note ? `<div class="mute">${esc(p.note)}</div>` : ''}</td>
       <td class="nowrap" data-l="วันที่ส่ง">${thDate(p.sent_date) || '<span class="mute">-</span>'}</td>
       <td class="addr" data-l="ส่งไปที่">${esc(p.destination).replace(/\n/g, '<br>') || '<span class="mute">-</span>'}</td>
@@ -503,11 +518,11 @@ function selChanged() {
   $('#selCount').textContent = `เลือก ${n} ซอง`;
 }
 
-const FIELD_TH = { customer: 'ลูกค้า', sent_date: 'วันที่ส่ง', destination: 'ส่งไปที่', carrier: 'ส่งทาง', tracking_no: 'เลขพัสดุ',
+const FIELD_TH = { company_id: 'บริษัทผู้ส่ง', customer: 'ลูกค้า', sent_date: 'วันที่ส่ง', destination: 'ส่งไปที่', carrier: 'ส่งทาง', tracking_no: 'เลขพัสดุ',
   status: 'สถานะ', note: 'หมายเหตุ', receipts: 'ใบเสร็จในซอง' };
 // ประวัติการแก้ไข: ใครแก้ เมื่อไร หมายเหตุ และแต่ละช่อง ค่าเดิม → ค่าใหม่
 function histHtml(edits) {
-  const fmt = (k, v) => (k.endsWith('_date') ? thDate(v) : k === 'status' ? S.statuses[v] : k === 'receipts'
+  const fmt = (k, v) => (k.endsWith('_date') ? thDate(v) : k === 'status' ? S.statuses[v] : k === 'company_id' ? companyOf(v).name : k === 'receipts'
     ? String(v).replace(/(\d{4}-\d{2}-\d{2})/g, (d) => thDate(d)) : v) || '(ว่าง)';
   return edits.map((e) => {
     const before = JSON.parse(e.before || '{}'), after = JSON.parse(e.after || '{}');
@@ -568,7 +583,7 @@ function splitPostcode(text) {
   return m ? { address: m[1].trim(), postcode: m[2] } : { address: (text || '').trim(), postcode: '' };
 }
 function envelopeHtml(p, opt) {
-  const e = S.envelope;
+  const e = S.envelope, co = companyOf(p.company_id);
   const { address, postcode } = splitPostcode(p.destination);
   // ถ้าที่อยู่มีชื่อลูกค้าอยู่แล้ว ไม่พิมพ์ชื่อซ้ำ
   const showName = !address.includes(p.customer);
@@ -576,7 +591,7 @@ function envelopeHtml(p, opt) {
   const refs = p.receipts.map((r) => r.receipt_no);
   return `<div class="env-page" style="width:${e.env_w}in;height:${e.env_h}in">
     <div class="env-inner" style="transform:translate(${e.env_dx}mm,${e.env_dy}mm)">
-      <div class="env-from"><div class="env-label">ผู้ส่ง</div><b>${esc(e.env_sender_name || S.orgName)}</b><br>${nl(e.env_sender_address)}</div>
+      <div class="env-from"><div class="env-label">ผู้ส่ง</div><b>${esc(co.name)}</b><br>${nl(co.address)}${co.phone ? `<br>โทร ${esc(co.phone)}` : ''}</div>
       <div class="env-to"><div class="env-label">กรุณาส่ง</div>
         ${showName ? `<div class="env-name">${esc(p.customer)}</div>` : ''}
         <div class="env-addr">${nl(address) || (showName ? '' : esc(p.customer))}</div>
@@ -590,9 +605,9 @@ function envelopeDialog(parcels) {
   const e = S.envelope;
   const noAddr = parcels.filter((p) => !p.destination.trim());
   const d = dialog(`<h3>พิมพ์หน้าซอง ${parcels.length} ซอง</h3>
-    <p class="mute">ขนาดซอง ${e.env_w} × ${e.env_h} นิ้ว${isAdmin() ? ' (เปลี่ยนขนาด ผู้ส่ง และตำแหน่งได้ที่ ผู้ใช้และตั้งค่า)' : ''} ·
+    <p class="mute">ขนาดซอง ${e.env_w} × ${e.env_h} นิ้ว${isAdmin() ? ' (เปลี่ยนขนาด ตำแหน่ง และที่อยู่บริษัทผู้ส่งได้ที่ ผู้ใช้และตั้งค่า)' : ''} ·
       ตอนสั่งพิมพ์ ให้เลือกขนาดกระดาษในเครื่องพิมพ์ให้ตรงกับซอง และตั้งขอบกระดาษ (Margins) เป็น "ไม่มี"</p>
-    ${!e.env_sender_address ? `<div class="warn">ยังไม่ได้ตั้งที่อยู่ผู้ส่ง${isAdmin() ? ' — ตั้งได้ที่เมนู ผู้ใช้และตั้งค่า' : ' — แจ้งผู้ดูแลให้ตั้งค่า'}</div>` : ''}
+    ${parcels.some((p) => !companyOf(p.company_id).address) ? `<div class="warn">บริษัทผู้ส่งยังไม่มีที่อยู่: ${[...new Set(parcels.filter((p) => !companyOf(p.company_id).address).map((p) => esc(companyOf(p.company_id).name || '(ไม่ระบุ)')))].join(', ')}${isAdmin() ? ' — ตั้งได้ที่เมนู ผู้ใช้และตั้งค่า' : ' — แจ้งผู้ดูแลให้ตั้งค่า'}</div>` : ''}
     ${noAddr.length ? `<div class="warn">ซองที่ยังไม่มีที่อยู่ผู้รับ: ${noAddr.map((p) => esc(p.customer)).join(', ')}</div>` : ''}
     <label class="checkrow"><input type="checkbox" id="envRefs" checked> พิมพ์เลขที่ใบเสร็จตัวเล็กที่มุมซ้ายล่าง (ไว้ตรวจว่าใส่ใบเสร็จครบ)</label>
     <div class="env-preview" id="envPrev"></div>
@@ -636,7 +651,7 @@ function printEnvelopes(parcels, opt) {
 
 // ---------- ใบรายการใบเสร็จ (A4 ใส่ไปในซองให้ลูกค้า) ----------
 function slipHtml(p, opt) {
-  const e = S.envelope;
+  const co = companyOf(p.company_id);
   const nl = (t) => esc(t).replace(/\n/g, '<br>');
   const sorted = opt.sort
     ? [...p.receipts].sort((a, b) => a.bill_date.localeCompare(b.bill_date) || a.receipt_no.localeCompare(b.receipt_no, 'th', { numeric: true }))
@@ -645,7 +660,7 @@ function slipHtml(p, opt) {
   const showCust = p.receipts.some((r) => r.customer && r.customer !== p.customer); // ลูกค้าคนละรายกับผู้รับ
   const longDate = (d) => (d ? new Date(d + 'T00:00:00').toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' }) : '');
   return `<div class="slip-page">
-    <div class="slip-head"><div><div class="slip-org">${esc(e.env_sender_name || S.orgName)}</div><div class="slip-small">${nl(e.env_sender_address)}</div></div>
+    <div class="slip-head"><div><div class="slip-org">${esc(co.name)}</div><div class="slip-small">${nl(co.address)}${co.phone ? `<br>โทร ${esc(co.phone)}` : ''}</div></div>
       <div class="slip-date">วันที่ ${longDate(p.sent_date || today())}</div></div>
     <h1 class="slip-title">รายการใบเสร็จรับเงินที่จัดส่ง</h1>
     <table class="slip-info"><tr><th>เรียน</th><td><b>${esc(p.customer)}</b>${p.destination ? `<br>${nl(p.destination)}` : ''}</td></tr>
@@ -704,10 +719,7 @@ function printSlips(parcels, o) {
 async function envelopeSettingsCard() {
   const e = S.envelope;
   return `<div class="card"><h3 style="margin-top:0">หน้าซอง</h3><form id="envForm">
-    <div class="grid">
-      <label>ชื่อผู้ส่ง <span class="mute">(ว่าง = ใช้ชื่อหน่วยงาน)</span><input name="env_sender_name" value="${esc(e.env_sender_name)}"></label>
-      <label class="span2">ที่อยู่ผู้ส่ง (พิมพ์หลายบรรทัดได้ ใส่เบอร์โทรด้วยก็ได้)<textarea name="env_sender_address" rows="3">${esc(e.env_sender_address)}</textarea></label>
-    </div>
+    <p class="mute">ชื่อและที่อยู่ผู้ส่งบนหน้าซอง ใช้ตาม "บริษัทผู้ส่ง" ของแต่ละซอง (ตั้งได้ในหัวข้อบริษัทผู้ส่งด้านบน)</p>
     <div class="grid">
       <label>ขนาดซองสำเร็จรูป<select id="envPreset">
         <option value="12.5x9">9 × 12½ นิ้ว</option><option value="12.75x9">9 × 12¾ นิ้ว (A4)</option><option value="10x7">7 × 10 นิ้ว</option>
@@ -731,7 +743,7 @@ function wireEnvelopeSettings() {
   $('#envTest').onclick = () => {
     const saved = S.envelope;
     S.envelope = { ...saved, ...Object.fromEntries(new FormData($('#envForm'))) };
-    envelopeDialog([{ customer: 'บริษัท ตัวอย่างผู้รับ จำกัด', destination: 'ฝ่ายบัญชี\n99/1 ถ.สุขุมวิท แขวงคลองเตย เขตคลองเตย กรุงเทพฯ 10110',
+    envelopeDialog([{ company_id: lastCompanyId(), customer: 'บริษัท ตัวอย่างผู้รับ จำกัด', destination: 'ฝ่ายบัญชี\n99/1 ถ.สุขุมวิท แขวงคลองเตย เขตคลองเตย กรุงเทพฯ 10110',
       receipts: [{ receipt_no: 'RC0001', amount: 12500 }, { receipt_no: 'RC0002', amount: 3480.5 }] }]);
     $('#dlg').addEventListener('close', () => (S.envelope = saved), { once: true });
   };
@@ -745,6 +757,7 @@ function importDialog() {
       (ลำดับไม่สำคัญ วันที่ใช้ วว/ดด/ปปปป ได้ทั้ง พ.ศ. และ ค.ศ.) · <a href="/api/import-template.xlsx">ดาวน์โหลดไฟล์แม่แบบ</a></p>
     <form>
       <label>ไฟล์ Excel (.xlsx, .xls, .csv)<input type="file" name="file" accept=".xlsx,.xls,.csv" required></label>
+      <label>ส่งในนามบริษัท <span class="mute">(ถ้าในไฟล์มีคอลัมน์ "บริษัทผู้ส่ง" จะใช้ตามไฟล์)</span><select name="company_id">${companyOptions(lastCompanyId())}</select></label>
       <label>ถ้าเลขที่ใบเสร็จมีอยู่แล้วในระบบ<select name="mode">
         <option value="skip">ข้าม (เพิ่มเฉพาะใบเสร็จใหม่)</option>
         <option value="update">อัปเดตซองเดิม ด้วยข้อมูลการส่งในไฟล์ (เช่น เติมวันที่ส่ง/เลขพัสดุ)</option></select></label>
@@ -759,7 +772,7 @@ function importDialog() {
     go.disabled = true; $('.err', form).textContent = ''; out.innerHTML = b64 ? '<p class="mute">กำลังตรวจไฟล์…</p>' : '';
     if (!b64) return;
     try {
-      const r = await api('/api/import', { body: { file: b64, mode: form.elements.mode.value } });
+      const r = await api('/api/import', { body: { file: b64, mode: form.elements.mode.value, company_id: form.elements.company_id.value } });
       const n = r.createParcels + r.updateParcels;
       out.innerHTML = `<div class="card" style="margin:0">
         <b>ตรวจแล้ว (แผ่นงาน "${esc(r.sheet)}")</b>: ซองใหม่ <b>${r.createParcels}</b> (${r.createReceipts} ใบเสร็จ) · อัปเดตซองเดิม <b>${r.updateParcels}</b> · ข้าม ${r.skipped}
@@ -786,9 +799,9 @@ function importDialog() {
     rd.onload = () => { b64 = String(rd.result).split(',')[1] || ''; check(); };
     rd.readAsDataURL(f);
   };
-  form.elements.mode.onchange = check;
+  form.elements.mode.onchange = form.elements.company_id.onchange = check;
   onSubmit(form, async (v) => {
-    const r = await api('/api/import', { body: { file: b64, mode: v.mode, commit: true } });
+    const r = await api('/api/import', { body: { file: b64, mode: v.mode, company_id: v.company_id, commit: true } });
     d.close(); toast(`นำเข้าแล้ว: ซองใหม่ ${r.createParcels} · อัปเดต ${r.updateParcels}`); loadCustomers(true); load();
   });
 }
@@ -892,18 +905,42 @@ async function adminPage() {
   $('#main').innerHTML = `<h2>ผู้ใช้และตั้งค่า</h2>
     <div class="card"><form id="orgForm" class="bar"><label class="grow">ชื่อหน่วยงาน (แสดงหน้าเข้าสู่ระบบและหัวรายงาน)
       <input name="orgName" required value="${esc(S.orgName)}"></label><button class="btn" type="submit">บันทึก</button><div class="err"></div></form></div>
+    <div class="card"><div class="bar"><b class="grow">บริษัทผู้ส่ง</b><button class="btn" id="addCo">+ เพิ่มบริษัท</button></div>
+      <div class="tablewrap"><table><tr><th>ชื่อบริษัท</th><th>ที่อยู่ (พิมพ์บนหน้าซองและใบรายการ)</th><th>เบอร์โทร</th><th>สถานะ</th><th></th></tr>
+        ${S.companies.map((c) => `<tr><td><b>${esc(c.name)}</b></td><td>${esc(c.address).replace(/\n/g, '<br>') || '<span class="err">ยังไม่มีที่อยู่</span>'}</td>
+          <td>${esc(c.phone) || '-'}</td><td>${c.active ? 'ใช้งาน' : '<span class="mute">ปิดใช้งาน</span>'}</td>
+          <td><button class="btn ghost sm" data-co="${c.id}">แก้ไข</button></td></tr>`).join('')}</table></div>
+      <p class="mute">ตอนบันทึกซองเลือกได้ว่าส่งในนามบริษัทไหน · ปิดใช้งานแทนการลบ (ซองเก่ายังแสดงชื่อบริษัทเดิมได้)</p></div>
     ${await envelopeSettingsCard()}
     <div class="card"><div class="bar"><b class="grow">ผู้ใช้งาน</b><button class="btn" id="addUser">+ เพิ่มผู้ใช้</button></div>
       <div class="tablewrap" id="users"></div>
       <p class="mute">พนักงาน: บันทึกและแก้ไขรายการได้ · ผู้ดูแล: ทำได้ทุกอย่าง รวมถึงลบรายการและจัดการผู้ใช้</p></div>`;
   onSubmit($('#orgForm'), async (v) => { await api('/api/settings', { method: 'PUT', body: v }); S.orgName = v.orgName; toast('บันทึกแล้ว'); });
   wireEnvelopeSettings();
+  $('#addCo').onclick = () => companyDialog();
+  $$('[data-co]').forEach((b) => (b.onclick = () => companyDialog(S.companies.find((c) => c.id === Number(b.dataset.co)))));
   $('#addUser').onclick = () => userDialog();
   const users = await api('/api/users');
   $('#users').innerHTML = `<table><tr><th>ชื่อผู้ใช้</th><th>ชื่อ-สกุล</th><th>สิทธิ์</th><th>สถานะ</th><th></th></tr>
     ${users.map((u) => `<tr><td>${esc(u.username)}</td><td>${esc(u.name)}</td><td>${u.role === 'admin' ? 'ผู้ดูแล' : 'พนักงาน'}</td>
       <td>${u.active ? 'ใช้งาน' : '<span class="mute">ปิดใช้งาน</span>'}</td><td><button class="btn ghost sm" data-u="${u.id}">แก้ไข</button></td></tr>`).join('')}</table>`;
   $$('[data-u]').forEach((b) => (b.onclick = () => userDialog(users.find((u) => u.id === Number(b.dataset.u)))));
+}
+
+function companyDialog(c) {
+  const d = dialog(`<h3>${c ? 'แก้ไขบริษัทผู้ส่ง' : 'เพิ่มบริษัทผู้ส่ง'}</h3><form>
+    <label><span>ชื่อบริษัท <b class="req">*</b></span><input name="name" required value="${esc(c?.name)}"></label>
+    <label>ที่อยู่ (พิมพ์หลายบรรทัดได้)<textarea name="address" rows="3">${esc(c?.address)}</textarea></label>
+    <label>เบอร์โทร<input name="phone" value="${esc(c?.phone)}"></label>
+    ${c ? '<label>สถานะ<select name="active"><option value="1">ใช้งาน</option><option value="">ปิดใช้งาน</option></select></label>' : ''}
+    <div class="err"></div><div class="actions"><button type="button" class="btn ghost" data-close>ยกเลิก</button><button class="btn" type="submit">บันทึก</button></div></form>`);
+  if (c) $('form', d).elements.active.value = c.active ? '1' : '';
+  onSubmit($('form', d), async (v) => {
+    if (c) await api(`/api/companies/${c.id}`, { method: 'PUT', body: { ...v, active: !!v.active } });
+    else await api('/api/companies', { body: v });
+    S.companies = (await api('/api/state')).companies;
+    d.close(); toast('บันทึกบริษัทผู้ส่งแล้ว'); adminPage();
+  });
 }
 
 function userDialog(u) {

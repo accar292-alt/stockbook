@@ -85,6 +85,11 @@ const SCHEMA = `
     phone TEXT NOT NULL DEFAULT '', carrier TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', -- carrier: ไม่ใช้แล้ว
     updated_by INTEGER REFERENCES users(id), updated_at TEXT
   );
+  -- บริษัทผู้ส่ง (ซองแต่ละซองส่งในนามบริษัทใด ใช้ชื่อ/ที่อยู่นี้บนหน้าซองและใบรายการ)
+  CREATE TABLE IF NOT EXISTS companies (
+    id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, address TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 1
+  );
   CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   INSERT OR IGNORE INTO settings VALUES ('org_name', 'บริษัทของฉัน');
 `;
@@ -102,6 +107,14 @@ const ensureReady = () => (ready ??= (async () => {
     const ecols = (await db.all(`SELECT name FROM pragma_table_info('parcel_edits')`)).map((c) => c.name);
     if (!ecols.includes('after')) await db.run(`ALTER TABLE parcel_edits ADD COLUMN after TEXT NOT NULL DEFAULT '{}'`);
     if (!ecols.includes('reason')) await db.run(`ALTER TABLE parcel_edits ADD COLUMN reason TEXT NOT NULL DEFAULT ''`);
+    // บริษัทผู้ส่ง: ครั้งแรกสร้างบริษัทแรกจากชื่อ/ที่อยู่ผู้ส่งที่ตั้งไว้เดิม แล้วให้ซองเดิมทั้งหมดเป็นของบริษัทนี้
+    const pcols = (await db.all(`SELECT name FROM pragma_table_info('parcels')`)).map((c) => c.name);
+    if (!pcols.includes('company_id')) await db.run('ALTER TABLE parcels ADD COLUMN company_id INTEGER REFERENCES companies(id)');
+    if (!(await db.get('SELECT 1 FROM companies'))) {
+      const name = (await setting('env_sender_name')) || (await setting('org_name')) || 'บริษัทของฉัน';
+      await db.run('INSERT INTO companies (name, address) VALUES (?, ?)', name, await setting('env_sender_address'));
+    }
+    await db.run('UPDATE parcels SET company_id = (SELECT MIN(id) FROM companies) WHERE company_id IS NULL');
     // ครั้งแรก: สร้างสมุดที่อยู่จากที่อยู่ล่าสุดที่เคยส่งให้ลูกค้าแต่ละราย
     if (!(await db.get(`SELECT 1 FROM settings WHERE key = 'customers_seeded'`))) {
       await client.batch([
@@ -147,11 +160,12 @@ function parseAmount(v) {
   return Math.round(n * 100);
 }
 const baht = (satang) => (satang == null ? null : satang / 100);
-const PARCEL_FIELDS = ['customer', 'destination', 'sent_date', 'carrier', 'tracking_no', 'status', 'note'];
+const PARCEL_FIELDS = ['company_id', 'customer', 'destination', 'sent_date', 'carrier', 'tracking_no', 'status', 'note'];
 
 // ตรวจข้อมูลซอง + รายการใบเสร็จในซอง
 function parcelInput(body) {
   const p = {
+    company_id: Number(body.company_id) || 0,
     customer: str(body.customer, 200),
     destination: str(body.destination, 500),
     sent_date: str(body.sent_date, 10),
@@ -159,6 +173,7 @@ function parcelInput(body) {
     tracking_no: normTracking(body.tracking_no),
     note: str(body.note, 500),
   };
+  if (!p.company_id) fail(400, 'เลือกบริษัทผู้ส่ง');
   if (!p.customer) fail(400, 'กรอกชื่อลูกค้า');
   if (p.sent_date && !isDate(p.sent_date)) fail(400, 'วันที่ส่งไม่ถูกต้อง');
   const list = Array.isArray(body.receipts) ? body.receipts : [];
@@ -238,6 +253,7 @@ async function envelopeSettings() {
 app.get('/api/state', async (req, res) => {
   const needSetup = (await db.get('SELECT COUNT(*) c FROM users')).c === 0;
   res.json({ needSetup, user: req.user || null, orgName: await setting('org_name'), carriers: CARRIERS, statuses: STATUS_TH,
+    companies: req.user ? await db.all('SELECT id, name, address, phone, active FROM companies ORDER BY id') : [],
     envelope: req.user ? await envelopeSettings() : null });
 });
 
@@ -308,6 +324,26 @@ app.put('/api/users/:id', admin, async (req, res) => {
   res.json({ ok: true });
 });
 
+function companyInput(b) {
+  const c = { name: str(b.name, 200), address: str(b.address, 500), phone: str(b.phone, 100), active: b.active === undefined || b.active === true || b.active === '1' ? 1 : 0 };
+  if (!c.name) fail(400, 'กรอกชื่อบริษัท');
+  return c;
+}
+app.post('/api/companies', admin, async (req, res) => {
+  const c = companyInput(req.body);
+  if (await db.get('SELECT 1 FROM companies WHERE name = ?', c.name)) fail(400, `มีบริษัท "${c.name}" แล้ว`);
+  const r = await db.run('INSERT INTO companies (name, address, phone, active) VALUES (?, ?, ?, ?)', c.name, c.address, c.phone, c.active);
+  res.json({ ok: true, id: r.lastInsertRowid });
+});
+app.put('/api/companies/:id', admin, async (req, res) => {
+  const id = Number(req.params.id), c = companyInput(req.body);
+  if (await db.get('SELECT 1 FROM companies WHERE name = ? AND id <> ?', c.name, id)) fail(400, `มีบริษัท "${c.name}" แล้ว`);
+  if (!c.active && !(await db.get('SELECT 1 FROM companies WHERE active = 1 AND id <> ?', id))) fail(400, 'ต้องมีบริษัทที่เปิดใช้งานอย่างน้อย 1 บริษัท');
+  const r = await db.run('UPDATE companies SET name = ?, address = ?, phone = ?, active = ? WHERE id = ?', c.name, c.address, c.phone, c.active, id);
+  if (!r.changes) fail(404, 'ไม่พบบริษัท');
+  res.json({ ok: true });
+});
+
 const UPSERT_SETTING = `INSERT INTO settings VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`;
 app.put('/api/settings', admin, async (req, res) => {
   const stmts = [];
@@ -331,7 +367,7 @@ app.put('/api/settings', admin, async (req, res) => {
 });
 
 // ---------- parcels ----------
-const PARCEL_COLS = `p.id, p.customer, p.destination, p.sent_date, p.carrier, p.tracking_no, p.status, p.note,
+const PARCEL_COLS = `p.id, p.company_id, p.customer, p.destination, p.sent_date, p.carrier, p.tracking_no, p.status, p.note,
   p.created_at, p.updated_at, cu.name AS created_name, uu.name AS updated_name,
   (SELECT COUNT(*) FROM parcel_edits e WHERE e.parcel_id = p.id) AS edit_count`;
 const PARCEL_FROM = `FROM parcels p JOIN users cu ON cu.id = p.created_by LEFT JOIN users uu ON uu.id = p.updated_by`;
@@ -348,6 +384,7 @@ function listFilter(q) {
     for (let i = 0; i <= cols.length + 2; i++) args.push(like);
   }
   if (STATUSES.includes(q.status)) { where.push('p.status = ?'); args.push(q.status); }
+  if (Number(q.company)) { where.push('p.company_id = ?'); args.push(Number(q.company)); }
   if (q.by === 'sent') {
     if (isDate(q.from)) { where.push('p.sent_date >= ?'); args.push(q.from); }
     if (isDate(q.to)) { where.push(`p.sent_date <= ? AND p.sent_date <> ''`); args.push(q.to); }
@@ -445,9 +482,9 @@ async function rememberCustomer(p, update, userId) {
 
 const insertReceipts = (id, list) => list.map((r) => ({ sql: 'INSERT INTO parcel_receipts (parcel_id, receipt_no, bill_date, customer, amount, detail) VALUES (?, ?, ?, ?, ?, ?)',
   args: [id, r.receipt_no, r.bill_date, r.customer || '', r.amount ?? null, r.detail || ''] }));
-const INSERT_PARCEL = `INSERT INTO parcels (customer, destination, sent_date, carrier, tracking_no, status, note, created_by, created_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-const parcelArgs = (p) => [p.customer, p.destination, p.sent_date, p.carrier, p.tracking_no, p.status, p.note];
+const INSERT_PARCEL = `INSERT INTO parcels (company_id, customer, destination, sent_date, carrier, tracking_no, status, note, created_by, created_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+const parcelArgs = (p) => [p.company_id, p.customer, p.destination, p.sent_date, p.carrier, p.tracking_no, p.status, p.note];
 
 async function createParcel(p, userId, t = now()) {
   const tx = await client.transaction('write');
@@ -493,14 +530,20 @@ function updateStatements(old, p, userId, t, reason = '') {
   return [
     { sql: 'INSERT INTO parcel_edits (parcel_id, edited_by, edited_at, before, after, reason) VALUES (?, ?, ?, ?, ?, ?)',
       args: [old.id, userId, t, JSON.stringify(before), JSON.stringify(after), reason] },
-    { sql: `UPDATE parcels SET customer = ?, destination = ?, sent_date = ?, carrier = ?, tracking_no = ?, status = ?, note = ?,
+    { sql: `UPDATE parcels SET company_id = ?, customer = ?, destination = ?, sent_date = ?, carrier = ?, tracking_no = ?, status = ?, note = ?,
               updated_by = ?, updated_at = ? WHERE id = ?`, args: [...parcelArgs(p), userId, t, old.id] },
     ...(changedReceipts ? [{ sql: 'DELETE FROM parcel_receipts WHERE parcel_id = ?', args: [old.id] }, ...insertReceipts(old.id, p.receipts)] : []),
   ];
 }
 
+async function checkCompany(id, currentId = 0) {
+  const c = await db.get('SELECT id, active FROM companies WHERE id = ?', id);
+  if (!c) fail(400, 'ไม่พบบริษัทผู้ส่งที่เลือก');
+  if (!c.active && id !== currentId) fail(400, 'บริษัทผู้ส่งนี้ปิดใช้งานแล้ว');
+}
 app.post('/api/parcels', auth, async (req, res) => {
   const p = parcelInput(req.body);
+  await checkCompany(p.company_id);
   const id = await createParcel(p, req.user.id);
   await rememberCustomer(p, !!req.body.save_address, req.user.id);
   res.json({ ok: true, id });
@@ -513,7 +556,9 @@ app.put('/api/parcels/:id', auth, async (req, res) => {
   const body = { ...old, ...req.body };
   if (!req.body.receipts) body.receipts = old.receipts.map((r) => ({ ...r, amount: baht(r.amount) }));
   const reason = str(req.body.edit_reason, 300);
-  const stmts = updateStatements(old, parcelInput(body), req.user.id, now(), reason);
+  const np = parcelInput(body);
+  await checkCompany(np.company_id, old.company_id);
+  const stmts = updateStatements(old, np, req.user.id, now(), reason);
   if (!stmts.length) return res.json({ ok: true, unchanged: true });
   if (!reason) fail(400, 'กรอกหมายเหตุการแก้ไข ว่าแก้อะไรและเพราะอะไร');
   await client.batch(stmts, 'write');
@@ -544,6 +589,7 @@ const IMPORT_COLS = {
   status: ['สถานะ', 'status'],
   note: ['หมายเหตุ', 'note', 'remark'],
   detail: ['รายละเอียดสินค้า', 'รายการสินค้า', 'รายละเอียด', 'สินค้า', 'description', 'product'],
+  company: ['บริษัทผู้ส่ง', 'ส่งในนาม', 'ผู้ส่ง', 'sender'],
   amount: ['ยอดเงิน', 'จำนวนเงิน', 'ยอดรวม', 'ยอดชำระ', 'เงิน', 'amount', 'total'],
 };
 const normHead = (s) => String(s ?? '').toLowerCase().replace(/[\s._\-/()*:]/g, '');
@@ -606,6 +652,8 @@ app.post('/api/import', auth, async (req, res) => {
   try { wb = XLSX.read(Buffer.from(String(req.body.file || ''), 'base64'), { type: 'buffer' }); }
   catch { fail(400, 'อ่านไฟล์ไม่ได้ — ต้องเป็นไฟล์ Excel (.xlsx / .xls) หรือ .csv'); }
   const update = req.body.mode === 'update';
+  const companies = await db.all('SELECT id, name, active FROM companies');
+  const defaultCompany = companies.find((c) => c.id === Number(req.body.company_id) && c.active)?.id;
   // หาแผ่นงานและแถวหัวคอลัมน์ (ใน 15 แถวแรก) ที่ตรงกับชื่อคอลัมน์มากที่สุด — ข้ามแถวชื่อรายงานด้านบน
   let best = null;
   for (const name of wb.SheetNames) {
@@ -643,6 +691,12 @@ app.post('/api/import', auth, async (req, res) => {
         if (dt) v[k] = dt;
       }
       for (const k of ['customer', 'destination', 'carrier', 'note']) { const s = str(get(k), 500); if (s) v[k] = s; }
+      const cname = str(get('company'), 200);
+      if (cname) {
+        const co = companies.find((c) => c.name === cname);
+        if (!co) fail(400, `ไม่พบบริษัทผู้ส่ง "${cname}" (เพิ่มได้ที่ ผู้ใช้และตั้งค่า)`);
+        v.company_id = co.id;
+      }
       const tn = normTracking(get('tracking_no')); if (tn) v.tracking_no = tn;
       const amt = parseAmount(get('amount'));
       if (amt === undefined) fail(400, `ยอดเงิน "${get('amount')}" อ่านไม่ได้`);
@@ -664,7 +718,9 @@ app.post('/api/import', auth, async (req, res) => {
       if (update && (!v.bill_date || !v.customer)) fail(400, 'ไม่พบเลขที่ใบเสร็จนี้ในระบบ (และไม่มีวันที่ตัดบิล/ชื่อลูกค้าพอจะเพิ่มเป็นรายการใหม่)');
       if (!v.bill_date) fail(400, 'ไม่มีวันที่ตัดบิล');
       if (!v.customer) fail(400, 'ไม่มีชื่อลูกค้า');
-      const key = v.tracking_no ? `T|${v.tracking_no}` : `C|${v.customer}|${v.sent_date || ''}|${v.destination || ''}|${v.carrier || ''}`;
+      v.company_id ||= defaultCompany;
+      if (!v.company_id) fail(400, 'ไม่ได้ระบุบริษัทผู้ส่ง (เลือกในหน้าต่างนำเข้า หรือใส่คอลัมน์ "บริษัทผู้ส่ง")');
+      const key = v.tracking_no ? `T|${v.company_id}|${v.tracking_no}` : `C|${v.company_id}|${v.customer}|${v.sent_date || ''}|${v.destination || ''}|${v.carrier || ''}`;
       const g = groups.get(key) || { v: { ...v }, receipts: [], lines: [] };
       for (const k of ['destination', 'carrier', 'note', 'sent_date', 'status']) if (!g.v[k] && v[k]) g.v[k] = v[k];
       g.receipts.push({ receipt_no, bill_date: v.bill_date, customer: v.customer, amount: amt, detail: str(get('detail'), 500) });
@@ -769,12 +825,13 @@ const thDate = (d) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${Number(d.slice(
 app.get('/api/export.xlsx', auth, async (req, res) => {
   const f = listFilter(req.query);
   const rows = await withReceipts(await db.all(`SELECT ${PARCEL_COLS} ${PARCEL_FROM} WHERE ${f.sql} ${ORDER}`, ...f.args));
-  const aoa = [['ซองที่', 'เลขที่ใบเสร็จ', 'ชื่อลูกค้า', 'วันที่ตัดบิล', 'ยอดเงิน', 'รายละเอียดสินค้า', 'ส่งถึง', 'วันที่ส่ง', 'ส่งไปที่', 'ส่งทาง', 'เลขพัสดุ', 'สถานะ', 'หมายเหตุ', 'ผู้บันทึก']];
+  const coName = Object.fromEntries((await db.all('SELECT id, name FROM companies')).map((c) => [c.id, c.name]));
+  const aoa = [['ซองที่', 'บริษัทผู้ส่ง', 'เลขที่ใบเสร็จ', 'ชื่อลูกค้า', 'วันที่ตัดบิล', 'ยอดเงิน', 'รายละเอียดสินค้า', 'ส่งถึง', 'วันที่ส่ง', 'ส่งไปที่', 'ส่งทาง', 'เลขพัสดุ', 'สถานะ', 'หมายเหตุ', 'ผู้บันทึก']];
   for (const p of rows) for (const r of p.receipts)
-    aoa.push([p.id, r.receipt_no, r.customer || p.customer, thDate(r.bill_date), r.amount == null ? '' : r.amount / 100, r.detail, p.customer, thDate(p.sent_date), p.destination, p.carrier, p.tracking_no, STATUS_TH[p.status], p.note, p.created_name]);
+    aoa.push([p.id, coName[p.company_id] || '', r.receipt_no, r.customer || p.customer, thDate(r.bill_date), r.amount == null ? '' : r.amount / 100, r.detail, p.customer, thDate(p.sent_date), p.destination, p.carrier, p.tracking_no, STATUS_TH[p.status], p.note, p.created_name]);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [7, 16, 32, 12, 14, 36, 32, 12, 50, 22, 18, 16, 30, 18].map((wch) => ({ wch }));
-  for (let i = 1; i < aoa.length; i++) { const c = ws[XLSX.utils.encode_cell({ r: i, c: 4 })]; if (c && c.t === 'n') c.z = '#,##0.00'; }
+  ws['!cols'] = [7, 28, 16, 32, 12, 14, 36, 32, 12, 50, 22, 18, 16, 30, 18].map((wch) => ({ wch }));
+  for (let i = 1; i < aoa.length; i++) { const c = ws[XLSX.utils.encode_cell({ r: i, c: 5 })]; if (c && c.t === 'n') c.z = '#,##0.00'; }
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'การส่งใบเสร็จ');
   const name = `receipt-mail_${new Date().toISOString().slice(0, 10)}.xlsx`;
