@@ -445,18 +445,16 @@ function listPage() {
 }
 
 // แสดงเลขใบเสร็จในซอง: ถ้าค้นหาเลขใบเสร็จ ไฮไลต์ใบที่ตรง
+// เลขที่ใบเสร็จในซอง: ซ่อนไว้ กดเปิดดูได้ (ถ้าค้นหาเจอใบเสร็จในซองนี้ จะเปิดให้เองและไฮไลต์ใบที่ตรง)
 function receiptChips(p) {
   const q = F.q.trim().toLowerCase();
-  const max = 6;
   const hit = (r) => q && [r.receipt_no, r.customer, r.detail].some((x) => (x || '').toLowerCase().includes(q));
   const list = [...p.receipts].sort((a, b) => hit(b) - hit(a));
-  return `<div class="chips">${list.slice(0, max).map((r) => `<span class="chip ${hit(r) ? 'hit' : ''}" title="${esc(r.customer || p.customer)} · ตัดบิล ${thDate(r.bill_date)}${r.amount != null ? ` · ${money(r.amount)} บาท` : ''}${r.detail ? ` · ${esc(r.detail)}` : ''}">${esc(r.receipt_no)}${r.customer ? ` <span class="chip-c">${esc(r.customer)}</span>` : ''}</span>`).join('')}
-    ${list.length > max ? `<span class="mute">+อีก ${list.length - max} ใบ</span>` : ''}</div>`;
+  const auto = !openChips.has(p.id) && list.some(hit); // เปิดเพราะค้นหาเจอ (ไม่จำไว้)
+  return `<details class="rcpts" data-pid="${p.id}"${openChips.has(p.id) || auto ? ' open' : ''}${auto ? ' data-auto="1"' : ''}><summary>ดูเลขที่ใบเสร็จ (${p.receipts.length} ใบ)</summary>
+    <div class="chips">${list.map((r) => `<span class="chip ${hit(r) ? 'hit' : ''}" title="${esc(r.customer || p.customer)} · ตัดบิล ${thDate(r.bill_date)}${r.amount != null ? ` · ${money(r.amount)} บาท` : ''}${r.detail ? ` · ${esc(r.detail)}` : ''}">${esc(r.receipt_no)}${r.customer ? ` <span class="chip-c">${esc(r.customer)}</span>` : ''}</span>`).join('')}</div></details>`;
 }
-const billRange = (p) => {
-  const ds = p.receipts.map((r) => r.bill_date).sort();
-  return ds[0] === ds.at(-1) ? thDate(ds[0]) : `${thDate(ds[0])} – ${thDate(ds.at(-1))}`;
-};
+const openChips = new Set(); // ซองที่ผู้ใช้กดเปิดดูไว้ (คงไว้ตอนโหลดรายการใหม่)
 
 let rows = [];
 async function load() {
@@ -475,20 +473,24 @@ async function load() {
     F.status ? `สถานะ: ${S.statuses[F.status]}` : '', F.q ? `ค้นหา: ${F.q}` : '', `(${rows.length} ซอง)`].filter(Boolean).join(' · ');
   if (!rows.length) { $('#tbl').innerHTML = '<p class="mute">ไม่พบรายการ</p>'; selChanged(); return; }
   $('#tbl').innerHTML = `<table class="ships"><thead><tr>
-      <th class="noprint pickcell"><input type="checkbox" id="pickAll" title="เลือกทั้งหมด" aria-label="เลือกทั้งหมด"></th><th>ลูกค้า / ใบเสร็จในซอง</th><th>ตัดบิล</th><th>วันที่ส่ง</th><th>ส่งไปที่</th><th>ส่งทาง</th><th>เลขพัสดุ</th><th>สถานะ</th></tr></thead>
+      <th class="noprint pickcell"><input type="checkbox" id="pickAll" title="เลือกทั้งหมด" aria-label="เลือกทั้งหมด"></th><th>ลูกค้า / ใบเสร็จในซอง</th><th>วันที่ส่ง</th><th>ส่งไปที่</th><th>ส่งทาง</th><th>เลขพัสดุ</th><th>สถานะ</th></tr></thead>
     <tbody>${rows.map((p) => `<tr class="click ${p.status}" data-id="${p.id}">
       <td class="noprint pickcell"><input type="checkbox" class="pick" value="${p.id}" aria-label="เลือกซอง ${esc(p.customer)}"></td>
       <td class="cust"><b>${esc(p.customer)}</b> <span class="count">${p.receipts.length} ใบ${sumAmount(p.receipts) != null ? ` · ${money(sumAmount(p.receipts))} บาท` : ''}</span>${p.edit_count
         ? ` <span class="edited" title="แก้ล่าสุดโดย ${esc(p.updated_name)} ${thTime(p.updated_at)}">✎ แก้ไข ${p.edit_count} ครั้ง</span>` : ''}${receiptChips(p)}${p.note ? `<div class="mute">${esc(p.note)}</div>` : ''}</td>
-      <td class="nowrap" data-l="ตัดบิล">${billRange(p)}</td>
       <td class="nowrap" data-l="วันที่ส่ง">${thDate(p.sent_date) || '<span class="mute">-</span>'}</td>
       <td class="addr" data-l="ส่งไปที่">${esc(p.destination).replace(/\n/g, '<br>') || '<span class="mute">-</span>'}</td>
       <td data-l="ส่งทาง">${esc(p.carrier) || '<span class="mute">-</span>'}</td>
       <td class="track nowrap" data-l="เลขพัสดุ">${trackHtml(p)}</td><td class="st">${tag(p.status)}</td></tr>`).join('')}</tbody></table>
     ${rows.length >= 300 ? '<p class="mute">แสดง 300 ซองล่าสุด — ใช้ตัวกรองหรือส่งออก Excel เพื่อดูทั้งหมด</p>' : ''}`;
   $$('#tbl tbody tr').forEach((tr) => tr.addEventListener('click', (e) => {
-    if (e.target.closest('a, button, input, .pickcell')) return;
+    if (e.target.closest('a, button, input, .pickcell, details.rcpts')) return;
     editDialog(Number(tr.dataset.id));
+  }));
+  $$('#tbl details.rcpts').forEach((el) => (el.ontoggle = () => {
+    if (el.open && el.dataset.auto) return; // เปิดเองจากการค้นหา
+    delete el.dataset.auto;
+    if (el.open) openChips.add(+el.dataset.pid); else openChips.delete(+el.dataset.pid);
   }));
   $('#pickAll').onchange = (e) => { $$('.pick').forEach((c) => (c.checked = e.target.checked)); selChanged(); };
   $$('.pick').forEach((c) => (c.onchange = selChanged));

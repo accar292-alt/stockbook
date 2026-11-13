@@ -194,3 +194,8 @@ table.rtable th.num { text-align: right; }
 .dpick-btn:hover { border-color: var(--pri); }
 table.rtable .dwrap { width: 150px; }
 .bar .dwrap { width: 150px; }
+details.rcpts { margin-top: 2px; }
+details.rcpts summary { cursor: pointer; color: var(--info); font-size: .85em; width: fit-content; }
+details.rcpts summary:hover { text-decoration: underline; }
+details.rcpts[open] summary { margin-bottom: 2px; }
+@media print { details.rcpts summary { color: inherit; } }
