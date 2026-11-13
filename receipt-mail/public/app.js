@@ -257,7 +257,6 @@ async function wireParcelForm(form, excludeId = 0) {
   const fillFromBook = () => {
     const c = book();
     if (c && (!f.destination.value.trim() || f.destination.value === autoFilled)) { f.destination.value = c.address; autoFilled = c.address; }
-    if (c && c.carrier && !f.carrier.value.trim()) f.carrier.value = c.carrier;
     showHint();
   };
   f.customer.addEventListener('input', () => { if (book()) fillFromBook(); else showHint(); });
@@ -746,10 +745,10 @@ async function customersPage() {
   const render = () => {
     const q = custQ.trim().toLowerCase();
     const rows = list.filter((c) => !q || [c.name, c.address, c.phone, c.note].some((x) => (x || '').toLowerCase().includes(q)));
-    $('#ctbl').innerHTML = rows.length ? `<table class="ctable"><thead><tr><th>ชื่อลูกค้า</th><th>ที่อยู่</th><th>เบอร์โทร</th><th>ส่งทาง</th><th class="num">ซองที่ส่ง</th><th></th></tr></thead>
+    $('#ctbl').innerHTML = rows.length ? `<table class="ctable"><thead><tr><th>ชื่อลูกค้า</th><th>ที่อยู่</th><th>เบอร์โทร</th><th class="num">ซองที่ส่ง</th><th></th></tr></thead>
       <tbody>${rows.map((c) => `<tr class="click" data-cid="${c.id}"><td><b>${esc(c.name)}</b>${c.note ? `<div class="mute">${esc(c.note)}</div>` : ''}</td>
         <td class="addr" data-l="ที่อยู่">${esc(c.address).replace(/\n/g, '<br>') || '<span class="mute">ยังไม่มีที่อยู่</span>'}</td>
-        <td class="nowrap" data-l="โทร">${esc(c.phone) || '<span class="mute">-</span>'}</td><td data-l="ส่งทาง">${esc(c.carrier) || '<span class="mute">-</span>'}</td>
+        <td class="nowrap" data-l="โทร">${esc(c.phone) || '<span class="mute">-</span>'}</td>
         <td class="num" data-l="ซองที่ส่ง">${c.parcel_count}</td><td class="nowrap"><button class="btn ghost sm" data-edit="${c.id}">แก้ไข</button></td></tr>`).join('')}</tbody></table>
       <p class="mute">ทั้งหมด ${list.length} ราย${q ? ` · พบ ${rows.length} ราย` : ''}</p>` : `<p class="mute">${list.length ? 'ไม่พบลูกค้าที่ค้นหา' : 'ยังไม่มีลูกค้าในสมุด — กด "+ เพิ่มลูกค้า" หรือนำเข้าจาก Excel'}</p>`;
     $$('#ctbl tr[data-cid]').forEach((tr) => (tr.onclick = () => customerDialog(list.find((c) => c.id === Number(tr.dataset.cid)))));
@@ -763,12 +762,8 @@ function customerDialog(c) {
   const d = dialog(`<h3>${c ? 'แก้ไขข้อมูลลูกค้า' : 'เพิ่มลูกค้า'}</h3><form>
     <label><span>ชื่อลูกค้า <b class="req">*</b></span><input name="name" required value="${esc(c?.name)}" autocomplete="off"></label>
     <label>ที่อยู่สำหรับส่งเอกสาร (ชื่อผู้รับ / ที่อยู่ / รหัสไปรษณีย์)<textarea name="address" rows="4">${esc(c?.address)}</textarea></label>
-    <div class="grid">
-      <label>เบอร์โทร<input name="phone" value="${esc(c?.phone)}" autocomplete="off"></label>
-      <label>ส่งทาง (ค่าเริ่มต้น)<input name="carrier" list="carrierList3" value="${esc(c?.carrier)}" autocomplete="off"></label>
-    </div>
+    <label>เบอร์โทร<input name="phone" value="${esc(c?.phone)}" autocomplete="off"></label>
     <label>หมายเหตุ<input name="note" value="${esc(c?.note)}" placeholder="เช่น ส่งถึงฝ่ายบัญชี คุณ…"></label>
-    <datalist id="carrierList3">${S.carriers.map((x) => `<option value="${esc(x)}">`).join('')}</datalist>
     ${c ? `<p class="mute">ส่งไปแล้ว ${c.parcel_count} ซอง${c.updated_at ? ` · แก้ล่าสุด ${esc(c.updated_name || '')} ${thTime(c.updated_at)}` : ''}</p>` : ''}
     <div class="err"></div><div class="actions">
       ${c && isAdmin() ? '<button type="button" class="btn danger left" id="cDel">ลบออกจากสมุด</button>' : ''}
@@ -787,7 +782,7 @@ function customerDialog(c) {
 
 function customerImportDialog() {
   const d = dialog(`<h3>นำเข้าสมุดที่อยู่จาก Excel</h3>
-    <p class="mute">ไฟล์ต้องมีคอลัมน์ <b>ชื่อลูกค้า</b> และ <b>ที่อยู่</b> (มี เบอร์โทร, ส่งทาง, หมายเหตุ ด้วยก็ได้) · 1 แถว = ลูกค้า 1 ราย</p>
+    <p class="mute">ไฟล์ต้องมีคอลัมน์ <b>ชื่อลูกค้า</b> และ <b>ที่อยู่</b> (มี เบอร์โทร, หมายเหตุ ด้วยก็ได้) · 1 แถว = ลูกค้า 1 ราย</p>
     <form>
       <label>ไฟล์ Excel (.xlsx, .xls, .csv)<input type="file" name="file" accept=".xlsx,.xls,.csv" required></label>
       <label>ถ้ามีชื่อลูกค้านี้ในสมุดแล้ว<select name="mode"><option value="skip">ข้าม (เพิ่มเฉพาะลูกค้าใหม่)</option>
