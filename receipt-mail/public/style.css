@@ -204,3 +204,6 @@ details.rcpts[open] summary { margin-bottom: 2px; }
 .co-tag { font-size: .75em; color: var(--pri); font-weight: 600; }
 .env-permit { position: absolute; top: .45in; right: .55in; border: 1.5px solid #000; padding: 6px 14px; text-align: center; font-size: 12pt; line-height: 1.5; background: #fff; color: #000; }
 .permit-preview .env-permit { position: static; display: inline-block; margin-top: 8px; }
+.sumtable tfoot td { font-weight: 700; border-top: 2px solid var(--line); background: var(--th, #eef2f5); }
+.sumtable td.num, .sumtable th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.sumtable tr.pending-row td { color: var(--wait); }

@@ -193,7 +193,7 @@ $('#btnPassword').onclick = () => {
 };
 
 // ---------- nav ----------
-const PAGES = { list: 'รายการซองที่ส่ง', new: '+ บันทึกซองใหม่', customers: 'สมุดที่อยู่ลูกค้า', admin: 'ผู้ใช้และตั้งค่า' };
+const PAGES = { list: 'รายการซองที่ส่ง', new: '+ บันทึกซองใหม่', summary: 'สรุปรายเดือน', customers: 'สมุดที่อยู่ลูกค้า', admin: 'ผู้ใช้และตั้งค่า' };
 function renderNav() {
   $('#nav').innerHTML = Object.entries(PAGES).filter(([k]) => k !== 'admin' || isAdmin())
     .map(([k, t]) => `<button data-page="${k}">${t}</button>`).join('');
@@ -203,7 +203,7 @@ function go(page) {
   if (!PAGES[page] || (page === 'admin' && !isAdmin())) page = 'list';
   if (location.hash.slice(1) !== page) history.replaceState(null, '', '#' + page);
   $$('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.page === page));
-  ({ list: listPage, new: newPage, customers: customersPage, admin: adminPage })[page]();
+  ({ list: listPage, new: newPage, summary: summaryPage, customers: customersPage, admin: adminPage })[page]();
 }
 window.addEventListener('hashchange', () => S.user && go(location.hash.slice(1)));
 
@@ -813,6 +813,64 @@ function importDialog() {
     const r = await api('/api/import', { body: { file: b64, mode: v.mode, company_id: v.company_id, commit: true } });
     d.close(); toast(`นำเข้าแล้ว: ซองใหม่ ${r.createParcels} · อัปเดต ${r.updateParcels}`); loadCustomers(true); load();
   });
+}
+
+// ---------- สรุปรายเดือน ----------
+// นับตามเดือนของ "วันที่ส่ง" · ซองที่ยังไม่ส่ง (ไม่มีวันที่ส่ง) แสดงแยกบรรทัดบนสุด
+const SUM = { year: '', company: '' };
+const monthName = (ym) => new Date(`${ym}-01T00:00:00`).toLocaleDateString('th-TH', { month: 'long', year: 'numeric' });
+const monthEnd = (ym) => { const [y, m] = ym.split('-').map(Number); return `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`; };
+async function summaryPage() {
+  $('#main').innerHTML = `<h2>สรุปรายเดือน</h2>
+    <p class="mute">นับตามเดือนของวันที่ส่ง · กดที่เดือนเพื่อดูรายการซองของเดือนนั้น</p>
+    <div class="card"><div class="bar">
+      <label>ปี<select id="sy"><option value="">ทุกปี</option></select></label>
+      ${multiCompany() ? `<label>บริษัทผู้ส่ง<select id="sco"><option value="">ทุกบริษัท</option>${S.companies.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>` : ''}
+      <span class="grow"></span><button class="btn ghost" id="sprint">พิมพ์</button>
+    </div>
+    <div class="print-head"><b>${esc(S.orgName)}</b> — สรุปการส่งใบเสร็จรายเดือน <span id="sNote"></span></div>
+    <div class="tablewrap" id="stbl"><p class="mute">กำลังโหลด…</p></div></div>`;
+  $('#sprint').onclick = () => window.print();
+  if ($('#sco')) { $('#sco').value = SUM.company; $('#sco').onchange = () => { SUM.company = $('#sco').value; summaryPage(); }; }
+  let rows;
+  try { rows = await api('/api/summary?' + new URLSearchParams({ company: SUM.company })); }
+  catch (e) { $('#stbl').innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  // รวมเป็นรายเดือน
+  const months = new Map();
+  for (const r of rows) {
+    const m = months.get(r.ym) || { ym: r.ym, parcels: 0, receipts: 0, pending: 0, sent: 0, received: 0, returned: 0 };
+    m.parcels += r.parcels; m.receipts += r.receipts; m[r.status] += r.parcels;
+    months.set(r.ym, m);
+  }
+  const years = [...new Set([...months.keys()].filter(Boolean).map((ym) => ym.slice(0, 4)))].sort().reverse();
+  $('#sy').innerHTML = '<option value="">ทุกปี</option>' + years.map((y) => `<option value="${y}">${Number(y) + 543}</option>`).join('');
+  if (SUM.year && !years.includes(SUM.year)) SUM.year = '';
+  $('#sy').value = SUM.year;
+  $('#sy').onchange = () => { SUM.year = $('#sy').value; summaryPage(); };
+  const pending = months.get('');
+  const list = [...months.values()].filter((m) => m.ym && (!SUM.year || m.ym.startsWith(SUM.year)));
+  const total = list.reduce((t, m) => { for (const k of ['parcels', 'receipts', 'sent', 'received', 'returned']) t[k] += m[k]; return t; },
+    { parcels: 0, receipts: 0, sent: 0, received: 0, returned: 0 });
+  $('#sNote').textContent = [SUM.year ? `ปี ${Number(SUM.year) + 543}` : 'ทุกปี', SUM.company ? companyOf(SUM.company).name : ''].filter(Boolean).join(' · ');
+  const n = (v) => (v ? v.toLocaleString() : '<span class="mute">-</span>');
+  if (!list.length && !pending) { $('#stbl').innerHTML = '<p class="mute">ยังไม่มีข้อมูล — บันทึกซองที่หน้า "+ บันทึกซองใหม่"</p>'; return; }
+  $('#stbl').innerHTML = `<table class="sumtable"><thead><tr><th>เดือนที่ส่ง</th><th class="num">ซองที่ส่ง</th><th class="num">ใบเสร็จ</th>
+      <th class="num">${tag('sent')}</th><th class="num">${tag('received')}</th><th class="num">${tag('returned')}</th></tr></thead>
+    <tbody>
+      ${pending ? `<tr class="click pending-row" data-pending="1"><td>ยังไม่ส่ง (รอส่ง)</td><td class="num">${n(pending.parcels)}</td><td class="num">${n(pending.receipts)}</td>
+        <td class="num" colspan="3"><span class="mute">ยังไม่มีวันที่ส่ง</span></td></tr>` : ''}
+      ${list.map((m) => `<tr class="click" data-ym="${m.ym}"><td><b>${monthName(m.ym)}</b></td><td class="num">${n(m.parcels)}</td><td class="num">${n(m.receipts)}</td>
+        <td class="num">${n(m.sent)}</td><td class="num">${n(m.received)}</td><td class="num">${n(m.returned)}</td></tr>`).join('')}
+    </tbody>
+    ${list.length ? `<tfoot><tr><td>รวม${SUM.year ? ` ปี ${Number(SUM.year) + 543}` : 'ทั้งหมด'}</td><td class="num">${n(total.parcels)}</td><td class="num">${n(total.receipts)}</td>
+      <td class="num">${n(total.sent)}</td><td class="num">${n(total.received)}</td><td class="num">${n(total.returned)}</td></tr></tfoot>` : ''}</table>`;
+  // กดที่เดือน → หน้ารายการ กรองตามวันที่ส่งของเดือนนั้น
+  $$('#stbl tr[data-ym]').forEach((tr) => (tr.onclick = () => {
+    Object.assign(F, { q: '', status: '', by: 'sent', from: `${tr.dataset.ym}-01`, to: monthEnd(tr.dataset.ym), company: SUM.company });
+    go('list');
+  }));
+  const pr = $('#stbl tr[data-pending]');
+  if (pr) pr.onclick = () => { Object.assign(F, { q: '', status: 'pending', by: 'bill', from: '', to: '', company: SUM.company }); go('list'); };
 }
 
 // ---------- สมุดที่อยู่ลูกค้า ----------

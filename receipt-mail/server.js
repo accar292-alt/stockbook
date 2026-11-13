@@ -826,6 +826,16 @@ app.post('/api/customers/import', auth, async (req, res) => {
   res.json({ ...summary, committed: true });
 });
 
+// ---------- สรุปรายเดือน ----------
+// นับซองและใบเสร็จ แยกตามเดือนของวันที่ส่ง (ym = 'YYYY-MM') และสถานะ; ซองที่ยังไม่ส่ง ym = ''
+app.get('/api/summary', auth, async (req, res) => {
+  const where = ['p.deleted = 0'], args = [];
+  if (Number(req.query.company)) { where.push('p.company_id = ?'); args.push(Number(req.query.company)); }
+  res.json(await db.all(`SELECT substr(p.sent_date, 1, 7) AS ym, p.status, COUNT(*) AS parcels,
+      COALESCE(SUM((SELECT COUNT(*) FROM parcel_receipts r WHERE r.parcel_id = p.id)), 0) AS receipts
+    FROM parcels p WHERE ${where.join(' AND ')} GROUP BY ym, p.status ORDER BY ym DESC`, ...args));
+});
+
 // ---------- export ----------
 const thDate = (d) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${Number(d.slice(0, 4)) + 543}` : '');
 // 1 แถว = ใบเสร็จ 1 ใบ พร้อมข้อมูลซองที่ใส่ไป
