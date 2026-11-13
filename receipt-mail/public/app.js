@@ -256,15 +256,15 @@ async function load() {
   $('#printNote').textContent = [F.from || F.to ? `${by} ${thDate(F.from) || '…'} – ${thDate(F.to) || '…'}` : '',
     F.status ? `สถานะ: ${S.statuses[F.status]}` : '', F.q ? `ค้นหา: ${F.q}` : '', `(${rows.length} รายการ)`].filter(Boolean).join(' · ');
   if (!rows.length) { $('#tbl').innerHTML = '<p class="mute">ไม่พบรายการ</p>'; selChanged(); return; }
-  $('#tbl').innerHTML = `<table><thead><tr><th class="noprint"><input type="checkbox" id="pickAll" title="เลือกทั้งหมด"></th>
+  $('#tbl').innerHTML = `<table class="ships"><thead><tr><th class="noprint"><input type="checkbox" id="pickAll" title="เลือกทั้งหมด"></th>
       <th>เลขที่ใบเสร็จ</th><th>วันที่ตัดบิล</th><th>ชื่อลูกค้า</th><th>วันที่ส่ง</th><th>ส่งไปที่</th><th>ส่งทาง</th><th>เลขพัสดุ</th><th>สถานะ</th></tr></thead>
     <tbody>${rows.map((r) => `<tr class="click ${r.status}" data-id="${r.id}">
-      <td class="noprint"><input type="checkbox" class="pick" value="${r.id}"></td>
-      <td class="nowrap"><b>${esc(r.receipt_no)}</b></td><td class="nowrap">${thDate(r.bill_date)}</td>
-      <td>${esc(r.customer)}${r.note ? `<div class="mute">${esc(r.note)}</div>` : ''}</td>
-      <td class="nowrap">${thDate(r.sent_date) || '<span class="mute">-</span>'}</td>
-      <td class="addr">${esc(r.destination).replace(/\n/g, '<br>')}</td><td>${esc(r.carrier)}</td>
-      <td class="track nowrap">${trackHtml(r)}</td><td>${tag(r.status)}</td></tr>`).join('')}</tbody></table>
+      <td class="noprint pickcell"><input type="checkbox" class="pick" value="${r.id}" aria-label="เลือก ${esc(r.receipt_no)}"></td>
+      <td class="nowrap rno"><b>${esc(r.receipt_no)}</b></td><td class="nowrap" data-l="ตัดบิล">${thDate(r.bill_date)}</td>
+      <td class="cust">${esc(r.customer)}${r.note ? `<div class="mute">${esc(r.note)}</div>` : ''}</td>
+      <td class="nowrap" data-l="วันที่ส่ง">${thDate(r.sent_date) || '<span class="mute">-</span>'}</td>
+      <td class="addr" data-l="ส่งไปที่">${esc(r.destination).replace(/\n/g, '<br>') || '<span class="mute">-</span>'}</td><td data-l="ส่งทาง">${esc(r.carrier) || '<span class="mute">-</span>'}</td>
+      <td class="track nowrap" data-l="เลขพัสดุ">${trackHtml(r)}</td><td class="st">${tag(r.status)}</td></tr>`).join('')}</tbody></table>
     ${rows.length >= 300 ? '<p class="mute">แสดง 300 รายการล่าสุด — ใช้ตัวกรองหรือส่งออก Excel เพื่อดูทั้งหมด</p>' : ''}`;
   $('#pickAll').onchange = (e) => { $$('.pick').forEach((c) => (c.checked = e.target.checked)); selChanged(); };
   $$('#tbl tbody tr').forEach((tr) => tr.addEventListener('click', (e) => {
