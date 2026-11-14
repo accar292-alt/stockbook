@@ -136,18 +136,19 @@ table.rtable input.r-no { min-width: 150px; }
 }
 @media screen and (max-width: 700px) { table.ships td.pickcell { display: none; } }
 /* ใบรายการใบเสร็จ A4 */
-.slip-page { width: 210mm; min-height: 297mm; padding: 15mm 15mm 15mm 18mm; background: #fff; color: #000; font-family: "Sarabun", "Leelawadee UI", Tahoma, sans-serif; font-size: 14pt; line-height: 1.45; }
+/* ใบรายการใบเสร็จ A4: ฟอนต์ TH Sarabun New 16pt (ต้องติดตั้งในเครื่องที่สั่งพิมพ์ ถ้าไม่มีจะใช้ Sarabun แทน) */
+.slip-page { width: 210mm; min-height: 297mm; padding: 15mm 15mm 15mm 18mm; background: #fff; color: #000; font-family: "TH Sarabun New", "THSarabunNew", "TH SarabunPSK", "Sarabun", "Leelawadee UI", Tahoma, sans-serif; font-size: 16pt; line-height: 1.2; }
 .slip-page p { margin: 8px 0; }
 .slip-head { display: flex; justify-content: space-between; gap: 16px; border-bottom: 1.5px solid #000; padding-bottom: 8px; }
-.slip-org { font-size: 16pt; font-weight: 700; }
-.slip-small { font-size: 11pt; color: #333; }
+.slip-org { font-size: 18pt; font-weight: 700; }
+.slip-small { font-size: 16pt; color: #333; }
 .slip-date { white-space: nowrap; }
-.slip-title { font-size: 18pt; text-align: center; margin: 14px 0 10px; }
+.slip-title { font-size: 20pt; text-align: center; margin: 14px 0 10px; }
 .slip-info { border-collapse: collapse; margin-bottom: 6px; width: auto; background: none; }
 .slip-info th { text-align: left; vertical-align: top; padding: 2px 14px 2px 0; font-weight: 600; white-space: nowrap; background: none; font-size: inherit; border: 0; color: #000; }
 .slip-info td { padding: 2px 0; border: 0; color: #000; }
 table.slip-list { width: 100%; border-collapse: collapse; margin: 6px 0 10px; background: none; }
-.slip-list th, .slip-list td { border: 1px solid #555; padding: 3px 10px; color: #000; background: none; font-size: 13pt; }
+.slip-list th, .slip-list td { border: 1px solid #555; padding: 3px 10px; color: #000; background: none; font-size: 16pt; }
 .slip-list th { background: #eee; }
 .slip-list .c { text-align: center; width: 11%; }
 .slip-list tr { break-inside: avoid; }
@@ -163,7 +164,7 @@ table.rtable th.num { text-align: right; }
 .slip-list .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .slip-list tfoot td { font-weight: 400; }
 .slip-list .c { width: 9%; }
-.slip-list th, .slip-list td { font-size: 12.5pt; }
+.slip-list th, .slip-list td { font-size: 16pt; }
 .slip-list th:nth-child(2), .slip-list td:nth-child(2) { width: 15%; }
 .slip-list .nowrap { white-space: nowrap; }
 .slip-list .num { width: 17%; }
