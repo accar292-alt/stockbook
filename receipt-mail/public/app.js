@@ -219,18 +219,17 @@ const receiptRow = (r = {}) => `<tr class="rrow">
   <td><input class="r-no" value="${esc(r.receipt_no)}" autocomplete="off" aria-label="เลขที่ใบเสร็จ" placeholder="เลขที่ใบเสร็จ"></td>
   <td><input class="r-cust" value="${esc(r.customer)}" list="custList" autocomplete="off" aria-label="ชื่อลูกค้าของใบเสร็จ" placeholder="(เหมือนผู้รับซอง)"></td>
   <td><input class="r-detail" value="${esc(r.detail)}" autocomplete="off" aria-label="รายละเอียดสินค้า" placeholder="เช่น หนังสือ ป.1 x 50 เล่ม"></td>
-  <td><input class="r-date" type="date" value="${esc(r.bill_date)}" aria-label="วันที่ตัดบิล"></td>
   <td><input class="r-amt" inputmode="decimal" value="${r.amount == null || r.amount === '' ? '' : typeof r.amount === 'number' ? money(r.amount) : esc(r.amount)}" autocomplete="off" aria-label="ยอดเงิน (บาท)" placeholder="0.00"></td>
   <td><button type="button" class="btn ghost sm r-del" title="เอาใบนี้ออก" aria-label="เอาใบนี้ออก">✕</button></td></tr>`;
 
 function parcelFields(p = {}) {
   const statusOpts = Object.entries(S.statuses).map(([k, t]) => `<option value="${k}">${esc(t)}</option>`).join('');
   return `<fieldset class="box"><legend>ใบเสร็จในซอง <span class="mute" data-count></span></legend>
-      <div class="tablewrap"><table class="rtable"><thead><tr><th>#</th><th>เลขที่ใบเสร็จ <b class="req">*</b></th><th>ชื่อลูกค้า</th><th>รายละเอียดสินค้า</th><th>วันที่ตัดบิล <b class="req">*</b></th><th class="num">ยอดเงิน (บาท)</th><th></th></tr></thead>
+      <div class="tablewrap"><table class="rtable"><thead><tr><th>#</th><th>เลขที่ใบเสร็จ <b class="req">*</b></th><th>ชื่อลูกค้า</th><th>รายละเอียดสินค้า</th><th class="num">ยอดเงิน (บาท)</th><th></th></tr></thead>
         <tbody>${(p.receipts?.length ? p.receipts : [{}]).map(receiptRow).join('')}</tbody></table></div>
       <div class="bar" style="margin:8px 0 0">
         <button type="button" class="btn ghost sm" data-add>+ เพิ่มใบเสร็จ</button>
-        <span class="mute">กด Enter ที่ช่องเลขที่เพื่อเพิ่มแถวถัดไป · วางเลขหลายใบพร้อมกันได้ (บรรทัดละเลข) · ชื่อลูกค้าและวันที่ตัดบิลจะใช้ตามแถวก่อนหน้า · เว้นชื่อลูกค้าว่าง = ใช้ชื่อผู้รับซอง</span>
+        <span class="mute">กด Enter ที่ช่องเลขที่เพื่อเพิ่มแถวถัดไป · วางเลขหลายใบพร้อมกันได้ (บรรทัดละเลข) · ชื่อลูกค้าจะใช้ตามแถวก่อนหน้า · เว้นชื่อลูกค้าว่าง = ใช้ชื่อผู้รับซอง</span>
       </div>
       <div class="dup" hidden></div>
     </fieldset>
@@ -254,7 +253,7 @@ function parcelFields(p = {}) {
 
 // อ่านรายการใบเสร็จจากฟอร์ม
 const formReceipts = (form) => $$('.rrow', form).map((tr) => ({ receipt_no: $('.r-no', tr).value.trim(), customer: $('.r-cust', tr).value.trim(),
-  detail: $('.r-detail', tr).value.trim(), bill_date: $('.r-date', tr).value, amount: $('.r-amt', tr).value.trim() }))
+  detail: $('.r-detail', tr).value.trim(), amount: $('.r-amt', tr).value.trim() }))
   .filter((r) => r.receipt_no || r.customer || r.detail || r.amount);
 
 // ผูกพฤติกรรมช่วยกรอก: แถวใบเสร็จ, เติมที่อยู่จากลูกค้าเดิม, เตือนเลขซ้ำ, ใส่วันที่ส่งเมื่อกรอกเลขพัสดุ
@@ -265,16 +264,14 @@ async function wireParcelForm(form, excludeId = 0) {
     const list = formReceipts(form), n = list.filter((r) => r.receipt_no).length, total = sumAmount(list);
     $('[data-count]', form).textContent = n ? `(${n} ใบ${total != null ? ` · รวม ${money(total)} บาท` : ''})` : '';
   };
-  const lastDate = () => [...$$('.r-date', form)].reverse().find((i) => i.value)?.value || today();
   const lastCust = () => [...$$('.r-cust', form)].at(-1)?.value || '';
   const addRow = (r = {}, focus = true) => {
-    tbody.insertAdjacentHTML('beforeend', receiptRow({ bill_date: lastDate(), customer: lastCust(), ...r }));
+    tbody.insertAdjacentHTML('beforeend', receiptRow({ customer: lastCust(), ...r }));
     const tr = tbody.lastElementChild;
     renumber();
     if (focus) $('.r-no', tr).focus();
     return tr;
   };
-  $$('.r-date', form).forEach((i) => { if (!i.value) i.value = today(); });
   renumber();
   $('[data-add]', form).onclick = () => addRow();
   tbody.addEventListener('click', (e) => {
@@ -421,7 +418,7 @@ function newPage() {
 }
 
 // ---------- list ----------
-const F = { q: '', status: '', by: 'bill', from: '', to: '', company: '' };
+const F = { q: '', status: '', from: '', to: '', company: '' };
 function listPage() {
   savedThisRound = [];
   $('#main').innerHTML = `<h2>รายการซองที่ส่ง</h2>
@@ -430,8 +427,7 @@ function listPage() {
       <div class="bar">
         <label class="grow">ค้นหา (เลขใบเสร็จ / ลูกค้า / เลขพัสดุ / ที่อยู่)<input id="fq" type="search" value="${esc(F.q)}"></label>
         ${multiCompany() ? `<label>บริษัทผู้ส่ง<select id="fco"><option value="">ทุกบริษัท</option>${S.companies.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>` : ''}
-        <label>ช่วงวันที่ของ<select id="fby"><option value="bill">วันที่ตัดบิล</option><option value="sent">วันที่ส่ง</option></select></label>
-        <label>ตั้งแต่<input id="ffrom" type="date" value="${F.from}"></label>
+        <label>วันที่ส่ง ตั้งแต่<input id="ffrom" type="date" value="${F.from}"></label>
         <label>ถึง<input id="fto" type="date" value="${F.to}"></label>
         <button class="btn ghost" id="fclear">ล้าง</button>
         <button class="btn ghost" id="fprint">พิมพ์</button>
@@ -444,12 +440,11 @@ function listPage() {
       <div class="print-head"><b>${esc(S.orgName)}</b> — รายการซองที่ส่ง <span id="printNote"></span></div>
       <div class="tablewrap" id="tbl"><p class="mute">กำลังโหลด…</p></div>
     </div>`;
-  $('#fby').value = F.by;
   if ($('#fco')) { $('#fco').value = F.company; $('#fco').onchange = () => { F.company = $('#fco').value; load(); }; }
   let t;
   $('#fq').oninput = () => { clearTimeout(t); t = setTimeout(() => { F.q = $('#fq').value; load(); }, 250); };
-  for (const [id, k] of [['#fby', 'by'], ['#ffrom', 'from'], ['#fto', 'to']]) $(id).onchange = () => { F[k] = $(id).value; load(); };
-  $('#fclear').onclick = () => { Object.assign(F, { q: '', status: '', by: 'bill', from: '', to: '', company: '' }); listPage(); };
+  for (const [id, k] of [['#ffrom', 'from'], ['#fto', 'to']]) $(id).onchange = () => { F[k] = $(id).value; load(); };
+  $('#fclear').onclick = () => { Object.assign(F, { q: '', status: '', from: '', to: '', company: '' }); listPage(); };
   $('#fprint').onclick = () => window.print();
   $('#fxlsx').onclick = () => (location.href = '/api/export.xlsx?' + new URLSearchParams(F));
   $('#fimport').onclick = importDialog;
@@ -467,7 +462,7 @@ function receiptChips(p) {
   const list = [...p.receipts].sort((a, b) => hit(b) - hit(a));
   const auto = !openChips.has(p.id) && list.some(hit); // เปิดเพราะค้นหาเจอ (ไม่จำไว้)
   return `<details class="rcpts" data-pid="${p.id}"${openChips.has(p.id) || auto ? ' open' : ''}${auto ? ' data-auto="1"' : ''}><summary>ดูเลขที่ใบเสร็จ (${p.receipts.length} ใบ)</summary>
-    <div class="chips">${list.map((r) => `<span class="chip ${hit(r) ? 'hit' : ''}" title="${esc(r.customer || p.customer)} · ตัดบิล ${thDate(r.bill_date)}${r.amount != null ? ` · ${money(r.amount)} บาท` : ''}${r.detail ? ` · ${esc(r.detail)}` : ''}">${esc(r.receipt_no)}${r.customer ? ` <span class="chip-c">${esc(r.customer)}</span>` : ''}</span>`).join('')}</div></details>`;
+    <div class="chips">${list.map((r) => `<span class="chip ${hit(r) ? 'hit' : ''}" title="${esc(r.customer || p.customer)}${r.amount != null ? ` · ${money(r.amount)} บาท` : ''}${r.detail ? ` · ${esc(r.detail)}` : ''}">${esc(r.receipt_no)}${r.customer ? ` <span class="chip-c">${esc(r.customer)}</span>` : ''}</span>`).join('')}</div></details>`;
 }
 const openChips = new Set(); // ซองที่ผู้ใช้กดเปิดดูไว้ (คงไว้ตอนโหลดรายการใหม่)
 
@@ -483,8 +478,7 @@ async function load() {
   $('#stats').innerHTML = stat('', 'ทั้งหมด', F.status ? data.totals[F.status] : { parcels: sum('parcels'), receipts: sum('receipts') })
     + Object.entries(S.statuses).map(([k, l]) => stat(k, l, data.totals[k])).join('');
   $$('#stats .stat').forEach((b) => (b.onclick = () => { F.status = F.status === b.dataset.st ? '' : b.dataset.st; load(); }));
-  const by = F.by === 'sent' ? 'วันที่ส่ง' : 'วันที่ตัดบิล';
-  $('#printNote').textContent = [F.from || F.to ? `${by} ${thDate(F.from) || '…'} – ${thDate(F.to) || '…'}` : '',
+  $('#printNote').textContent = [F.from || F.to ? `วันที่ส่ง ${thDate(F.from) || '…'} – ${thDate(F.to) || '…'}` : '',
     F.company ? `บริษัท: ${companyOf(F.company).name}` : '', F.status ? `สถานะ: ${S.statuses[F.status]}` : '', F.q ? `ค้นหา: ${F.q}` : '', `(${rows.length} ซอง)`].filter(Boolean).join(' · ');
   if (!rows.length) { $('#tbl').innerHTML = '<p class="mute">ไม่พบรายการ</p>'; selChanged(); return; }
   $('#tbl').innerHTML = `<table class="ships"><thead><tr>
@@ -663,7 +657,7 @@ function slipHtml(p, opt) {
   const co = companyOf(p.company_id);
   const nl = (t) => esc(t).replace(/\n/g, '<br>');
   const sorted = opt.sort
-    ? [...p.receipts].sort((a, b) => a.bill_date.localeCompare(b.bill_date) || a.receipt_no.localeCompare(b.receipt_no, 'th', { numeric: true }))
+    ? [...p.receipts].sort((a, b) => a.receipt_no.localeCompare(b.receipt_no, 'th', { numeric: true }))
     : p.receipts;
   const showAmt = opt.amount && p.receipts.some((r) => r.amount != null); // แสดงยอดรายใบ ไม่แสดงยอดรวม
   const showCust = p.receipts.some((r) => r.customer && r.customer !== p.customer); // ลูกค้าคนละรายกับผู้รับ
@@ -675,10 +669,10 @@ function slipHtml(p, opt) {
     <table class="slip-info"><tr><th>เรียน</th><td><b>${esc(p.customer)}</b>${p.destination ? `<br>${nl(p.destination)}` : ''}</td></tr>
       ${p.carrier || p.tracking_no ? `<tr><th>จัดส่งทาง</th><td>${esc(p.carrier) || '-'}${p.tracking_no ? ` &nbsp; เลขพัสดุ <b>${esc(p.tracking_no)}</b>` : ''}</td></tr>` : ''}</table>
     <p>ขอนำส่งใบเสร็จรับเงิน จำนวน <b>${p.receipts.length}</b> ฉบับ ตามรายการดังต่อไปนี้</p>
-    <table class="slip-list"><thead><tr><th class="c">ลำดับ</th><th>เลขที่ใบเสร็จ</th><th>วันที่</th>${showCust ? '<th>ชื่อลูกค้า</th>' : ''}${opt.detail ? '<th>รายละเอียดสินค้า</th>' : ''}${showAmt ? '<th class="num">จำนวนเงิน (บาท)</th>' : ''}<th class="c">ตรวจรับ</th></tr></thead>
-      <tbody>${sorted.map((r, i) => `<tr><td class="c">${i + 1}</td><td class="nowrap">${esc(r.receipt_no)}</td><td class="nowrap">${thDate(r.bill_date)}</td>
+    <table class="slip-list"><thead><tr><th class="c">ลำดับ</th><th>เลขที่ใบเสร็จ</th>${showCust ? '<th>ชื่อลูกค้า</th>' : ''}${opt.detail ? '<th>รายละเอียดสินค้า</th>' : ''}${showAmt ? '<th class="num">จำนวนเงิน (บาท)</th>' : ''}<th class="c">ตรวจรับ</th></tr></thead>
+      <tbody>${sorted.map((r, i) => `<tr><td class="c">${i + 1}</td><td class="nowrap">${esc(r.receipt_no)}</td>
         ${showCust ? `<td>${esc(r.customer || p.customer)}</td>` : ''}${opt.detail ? `<td>${esc(r.detail)}</td>` : ''}${showAmt ? `<td class="num">${r.amount != null ? money(r.amount) : '-'}</td>` : ''}<td class="c">☐</td></tr>`).join('')}</tbody>
-      <tfoot><tr><td colspan="${4 + (showCust ? 1 : 0) + (opt.detail ? 1 : 0) + (showAmt ? 1 : 0)}">รวมทั้งสิ้น <b>${p.receipts.length}</b> ฉบับ</td></tr></tfoot></table>
+      <tfoot><tr><td colspan="${3 + (showCust ? 1 : 0) + (opt.detail ? 1 : 0) + (showAmt ? 1 : 0)}">รวมทั้งสิ้น <b>${p.receipts.length}</b> ฉบับ</td></tr></tfoot></table>
     ${p.note && opt.note ? `<p class="slip-small">หมายเหตุ: ${esc(p.note)}</p>` : ''}
     <p>กรุณาตรวจสอบเอกสาร หากไม่ครบถ้วนหรือมีข้อสงสัย กรุณาติดต่อกลับ${opt.contact ? ` ${esc(opt.contact)}` : ''}</p>
     ${opt.sign ? `<div class="slip-sign"><div>ลงชื่อ ..................................................<br>ผู้จัดส่ง<br>วันที่ ........./........./.........</div>
@@ -695,7 +689,7 @@ function slipDialog(parcels) {
       <label class="checkrow"><input type="checkbox" id="slAmt" checked> แสดงยอดเงินของแต่ละใบ</label>
       <label class="checkrow"><input type="checkbox" id="slDetail" checked> แสดงรายละเอียดสินค้า</label>
       <label class="checkrow"><input type="checkbox" id="slSign" checked> ช่องลงชื่อผู้จัดส่ง / ผู้รับ</label>
-      <label class="checkrow"><input type="checkbox" id="slSort" checked> เรียงตามวันที่และเลขที่ใบเสร็จ</label>
+      <label class="checkrow"><input type="checkbox" id="slSort" checked> เรียงตามเลขที่ใบเสร็จ</label>
       <label class="checkrow"><input type="checkbox" id="slNote"> พิมพ์หมายเหตุของซอง</label>
     </div>
     <label>เบอร์ติดต่อกลับ (แสดงท้ายเอกสาร)<input id="slContact" value="${esc(lastContact)}" placeholder="เช่น ฝ่ายบัญชี โทร 02-123-4567"></label>
@@ -762,7 +756,7 @@ function wireEnvelopeSettings() {
 function importDialog() {
   const d = dialog(`<h3>นำเข้าจาก Excel</h3>
     <p class="mute">1 แถว = ใบเสร็จ 1 ใบ · ใบเสร็จที่มี<b>เลขพัสดุเดียวกัน</b>จะรวมเป็นซองเดียว
-      (ถ้ายังไม่มีเลขพัสดุ จะรวมตามลูกค้า + วันที่ส่ง + ที่อยู่) · คอลัมน์: เลขที่ใบเสร็จ, วันที่ตัดบิล, ชื่อลูกค้า, วันที่ส่ง, ส่งไปที่, ส่งทาง, เลขพัสดุ, หมายเหตุ
+      (ถ้ายังไม่มีเลขพัสดุ จะรวมตามลูกค้า + วันที่ส่ง + ที่อยู่) · คอลัมน์: เลขที่ใบเสร็จ, ชื่อลูกค้า, รายละเอียดสินค้า, ยอดเงิน, วันที่ส่ง, ส่งไปที่, ส่งทาง, เลขพัสดุ, หมายเหตุ
       (ลำดับไม่สำคัญ วันที่ใช้ วว/ดด/ปปปป ได้ทั้ง พ.ศ. และ ค.ศ.) · <a href="/api/import-template.xlsx">ดาวน์โหลดไฟล์แม่แบบ</a></p>
     <form>
       <label>ไฟล์ Excel (.xlsx, .xls, .csv)<input type="file" name="file" accept=".xlsx,.xls,.csv" required></label>
@@ -866,11 +860,11 @@ async function summaryPage() {
       <td class="num">${n(total.sent)}</td><td class="num">${n(total.received)}</td><td class="num">${n(total.returned)}</td></tr></tfoot>` : ''}</table>`;
   // กดที่เดือน → หน้ารายการ กรองตามวันที่ส่งของเดือนนั้น
   $$('#stbl tr[data-ym]').forEach((tr) => (tr.onclick = () => {
-    Object.assign(F, { q: '', status: '', by: 'sent', from: `${tr.dataset.ym}-01`, to: monthEnd(tr.dataset.ym), company: SUM.company });
+    Object.assign(F, { q: '', status: '', from: `${tr.dataset.ym}-01`, to: monthEnd(tr.dataset.ym), company: SUM.company });
     go('list');
   }));
   const pr = $('#stbl tr[data-pending]');
-  if (pr) pr.onclick = () => { Object.assign(F, { q: '', status: 'pending', by: 'bill', from: '', to: '', company: SUM.company }); go('list'); };
+  if (pr) pr.onclick = () => { Object.assign(F, { q: '', status: 'pending', from: '', to: '', company: SUM.company }); go('list'); };
 }
 
 // ---------- สมุดที่อยู่ลูกค้า ----------
