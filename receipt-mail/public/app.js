@@ -672,15 +672,13 @@ function slipHtml(p, opt) {
         ${showCust ? `<td>${esc(r.customer || p.customer)}</td>` : ''}${opt.detail ? `<td>${esc(r.detail)}</td>` : ''}${showAmt ? `<td class="num">${r.amount != null ? money(r.amount) : '-'}</td>` : ''}<td class="c">☐</td></tr>`).join('')}</tbody>
       <tfoot><tr><td colspan="${3 + (showCust ? 1 : 0) + (opt.detail ? 1 : 0) + (showAmt ? 1 : 0)}">รวมทั้งสิ้น <b>${p.receipts.length}</b> ฉบับ</td></tr></tfoot></table>
     ${p.note && opt.note ? `<p class="slip-small">หมายเหตุ: ${esc(p.note)}</p>` : ''}
-    <p>กรุณาตรวจสอบเอกสาร หากไม่ครบถ้วนหรือมีข้อสงสัย กรุณาติดต่อกลับ${opt.contact ? ` ${esc(opt.contact)}` : ''}</p>
+    <p>กรุณาตรวจสอบเอกสาร หากไม่ครบถ้วนหรือมีข้อสงสัย กรุณาติดต่อกลับ${(opt.contact || co.contact) ? ` <span class="slip-contact">${esc(opt.contact || co.contact)}</span>` : ''}</p>
     ${opt.sign ? `<div class="slip-sign"><div>ลงชื่อ ......................................<br>ผู้จัดส่ง<br>วันที่ ........./........./.........</div>
       <div>ลงชื่อ ......................................<br>ผู้รับเอกสาร<br>วันที่ ........./........./.........</div></div>` : ''}
   </div>`;
 }
 
 function slipDialog(parcels) {
-  let lastContact = '';
-  try { lastContact = localStorage.getItem('slip-contact') || ''; } catch {}
   const d = dialog(`<h3>พิมพ์ใบรายการใบเสร็จ ${parcels.length} ซอง</h3>
     <p class="mute">กระดาษ A4 · 1 ซองได้ 1 ชุด ถ้าใบเสร็จเยอะจะต่อขึ้นหน้าถัดไปเอง</p>
     <div class="grid">
@@ -690,7 +688,8 @@ function slipDialog(parcels) {
       <label class="checkrow"><input type="checkbox" id="slSort" checked> เรียงตามเลขที่ใบเสร็จ</label>
       <label class="checkrow"><input type="checkbox" id="slNote"> พิมพ์หมายเหตุของซอง</label>
     </div>
-    <label>เบอร์ติดต่อกลับ (แสดงท้ายเอกสาร)<input id="slContact" value="${esc(lastContact)}" placeholder="เช่น ฝ่ายบัญชี โทร 02-123-4567"></label>
+    <label>ข้อมูลติดต่อกลับ (ท้ายเอกสาร) <span class="mute">— เว้นว่าง = ใช้ข้อมูลที่ตั้งไว้ในบริษัทผู้ส่ง${isAdmin() ? ' (ตั้งได้ที่ ผู้ใช้และตั้งค่า → บริษัทผู้ส่ง)' : ''} · พิมพ์ในช่องนี้ = ใช้เฉพาะครั้งนี้</span>
+      <input id="slContact" placeholder="${esc([...new Set(parcels.map((p) => companyOf(p.company_id).contact).filter(Boolean))].join(' / ') || 'เช่น ฝ่ายบัญชี โทร 02-123-4567')}"></label>
     <div class="env-preview" id="slPrev"></div>
     <div class="actions"><button type="button" class="btn ghost" data-close>ปิด</button><button type="button" class="btn" id="slGo">พิมพ์</button></div>`, true);
   const opt = () => ({ amount: $('#slAmt', d).checked, detail: $('#slDetail', d).checked, sign: $('#slSign', d).checked, sort: $('#slSort', d).checked, note: $('#slNote', d).checked, contact: $('#slContact', d).value.trim() });
@@ -709,7 +708,6 @@ function slipDialog(parcels) {
   $$('input', d).forEach((i) => (i.oninput = i.onchange = render));
   $('#slGo', d).onclick = () => {
     const o = render();
-    try { localStorage.setItem('slip-contact', o.contact); } catch {}
     printSlips(parcels, o);
   };
 }
@@ -967,7 +965,7 @@ async function adminPage() {
     <div class="card"><div class="bar"><b class="grow">บริษัทผู้ส่ง</b><button class="btn" id="addCo">+ เพิ่มบริษัท</button></div>
       <div class="tablewrap"><table><tr><th>ชื่อบริษัท</th><th>ที่อยู่ (พิมพ์บนหน้าซองและใบรายการ)</th><th>เบอร์โทร</th><th>ใบอนุญาต ปณ.</th><th>สถานะ</th><th></th></tr>
         ${S.companies.map((c) => `<tr><td><b>${esc(c.name)}</b></td><td>${esc(c.address).replace(/\n/g, '<br>') || '<span class="err">ยังไม่มีที่อยู่</span>'}</td>
-          <td>${esc(c.phone) || '-'}</td><td>${c.permit_no ? `ใบอนุญาตที่ ${esc(c.permit_no)}<div class="mute">${esc(c.permit_office)}</div>` : '<span class="mute">-</span>'}</td><td>${c.active ? 'ใช้งาน' : '<span class="mute">ปิดใช้งาน</span>'}</td>
+          <td>${esc(c.phone) || '-'}${c.contact ? `<div class="mute">ติดต่อกลับ: ${esc(c.contact)}</div>` : ''}</td><td>${c.permit_no ? `ใบอนุญาตที่ ${esc(c.permit_no)}<div class="mute">${esc(c.permit_office)}</div>` : '<span class="mute">-</span>'}</td><td>${c.active ? 'ใช้งาน' : '<span class="mute">ปิดใช้งาน</span>'}</td>
           <td><button class="btn ghost sm" data-co="${c.id}">แก้ไข</button></td></tr>`).join('')}</table></div>
       <p class="mute">ตอนบันทึกซองเลือกได้ว่าส่งในนามบริษัทไหน · ปิดใช้งานแทนการลบ (ซองเก่ายังแสดงชื่อบริษัทเดิมได้)</p></div>
     ${await envelopeSettingsCard()}
@@ -991,6 +989,8 @@ function companyDialog(c) {
     <label><span>ชื่อบริษัท <b class="req">*</b></span><input name="name" required value="${esc(c?.name)}"></label>
     <label>ที่อยู่ (พิมพ์หลายบรรทัดได้)<textarea name="address" rows="3">${esc(c?.address)}</textarea></label>
     <label>เบอร์โทร<input name="phone" value="${esc(c?.phone)}"></label>
+    <label>ข้อมูลติดต่อกลับ <span class="mute">(พิมพ์ท้ายใบรายการใบเสร็จ ต่อจาก "กรุณาติดต่อกลับ")</span>
+      <input name="contact" value="${esc(c?.contact)}" placeholder="เช่น ฝ่ายบัญชี คุณสมใจ โทร 02-123-4567 ต่อ 12"></label>
     <fieldset class="box"><legend>ใบอนุญาตชำระค่าฝากส่งเป็นรายเดือน <span class="mute">(พิมพ์เป็นกรอบมุมขวาบนของหน้าซอง · เว้นว่าง = ไม่พิมพ์)</span></legend>
       <div class="grid">
         <label>ใบอนุญาตที่<input name="permit_no" value="${esc(c?.permit_no)}" placeholder="เช่น พิเศษ 3/2559" autocomplete="off"></label>
