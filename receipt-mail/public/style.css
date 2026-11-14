@@ -119,7 +119,7 @@ table.rtable input.r-no { min-width: 150px; }
 .env-from { position: absolute; left: .55in; top: .45in; max-width: 45%; font-size: 16pt; }
 .env-to { position: absolute; left: 42%; top: 40%; right: .6in; font-size: 18pt; } /* ชื่อ-ที่อยู่ผู้รับ 18pt */
 .env-name { font-size: 18pt; font-weight: 700; }
-.env-to .env-label { font-size: 18pt; color: #000; } /* คำว่า "กรุณาส่ง" ขนาดเท่าชื่อลูกค้า */
+.env-to .env-label { font-size: 18pt; font-weight: 700; color: #000; } /* คำว่า "กรุณาส่ง" ขนาดเท่าชื่อลูกค้า ตัวหนา */
 .env-zip { display: flex; gap: 4px; margin-top: 8px; }
 .env-zip span { width: .38in; height: .44in; border: 1.5px solid #000; display: flex; align-items: center; justify-content: center; font-size: 18pt; font-weight: 700; }
 .env-ref { position: absolute; left: .55in; bottom: .35in; right: 50%; font-size: 12pt; color: #555; }
