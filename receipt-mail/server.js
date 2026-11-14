@@ -64,7 +64,7 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS parcel_receipts (
     id INTEGER PRIMARY KEY, parcel_id INTEGER NOT NULL REFERENCES parcels(id),
     receipt_no TEXT NOT NULL,              -- เลขที่ใบเสร็จ
-    bill_date TEXT NOT NULL,               -- วันที่ตัดบิล YYYY-MM-DD
+    bill_date TEXT NOT NULL,               -- วันที่ตัดบิล YYYY-MM-DD (เลิกใช้แล้ว: ใบเสร็จใหม่เป็น '' ข้อมูลเก่ายังเก็บไว้)
     customer TEXT NOT NULL DEFAULT '',     -- ชื่อลูกค้าของใบเสร็จ (ว่าง = เหมือนลูกค้าผู้รับซอง)
     amount INTEGER,                        -- ยอดเงิน หน่วยสตางค์ (NULL = ไม่ระบุ)
     detail TEXT NOT NULL DEFAULT ''        -- รายละเอียดสินค้า
@@ -185,15 +185,13 @@ function parcelInput(body) {
   const seen = new Set();
   p.receipts = [];
   for (const r of list) {
-    const receipt_no = str(r?.receipt_no, 60), bill_date = str(r?.bill_date, 10);
+    const receipt_no = str(r?.receipt_no, 60), bill_date = isDate(r?.bill_date) ? r.bill_date : '';
     let customer = str(r?.customer, 200);
     const amount = parseAmount(r?.amount), detail = str(r?.detail, 500);
     if (!receipt_no && !bill_date && !customer && amount == null && !detail) continue; // แถวว่างในฟอร์ม
     if (customer === p.customer) customer = ''; // เหมือนผู้รับซอง ไม่ต้องเก็บซ้ำ
     if (!receipt_no) fail(400, 'มีแถวที่ไม่ได้กรอกเลขที่ใบเสร็จ');
-    if (!isDate(bill_date)) fail(400, `ใบเสร็จ ${receipt_no}: กรอกวันที่ตัดบิลให้ถูกต้อง`);
     if (seen.has(receipt_no)) fail(400, `ใบเสร็จ ${receipt_no} ซ้ำในซองนี้`);
-    if (p.sent_date && p.sent_date < bill_date) fail(400, `ใบเสร็จ ${receipt_no} ตัดบิลหลังวันที่ส่ง`);
     seen.add(receipt_no);
     if (amount === undefined) fail(400, `ใบเสร็จ ${receipt_no}: ยอดเงิน "${r.amount}" ไม่ถูกต้อง`);
     p.receipts.push({ receipt_no, bill_date, customer, amount, detail });
@@ -206,7 +204,7 @@ function parcelInput(body) {
   p.status = status;
   return p;
 }
-const receiptsText = (list) => list.map((r) => `${r.receipt_no} (${r.bill_date}${r.customer ? `, ${r.customer}` : ''}${r.amount != null ? `, ${(r.amount / 100).toFixed(2)} บาท` : ''}${r.detail ? `, ${r.detail}` : ''})`).join(', ');
+const receiptsText = (list) => list.map((r) => `${r.receipt_no} (${r.customer ? `, ${r.customer}` : ''}${r.amount != null ? `, ${(r.amount / 100).toFixed(2)} บาท` : ''}${r.detail ? `, ${r.detail}` : ''})`).join(', ');
 
 // ---------- app ----------
 const app = express();
@@ -379,7 +377,7 @@ const PARCEL_COLS = `p.id, p.company_id, p.customer, p.destination, p.sent_date,
   (SELECT COUNT(*) FROM parcel_edits e WHERE e.parcel_id = p.id) AS edit_count`;
 const PARCEL_FROM = `FROM parcels p JOIN users cu ON cu.id = p.created_by LEFT JOIN users uu ON uu.id = p.updated_by`;
 
-// ตัวกรอง: q = ค้นเลขใบเสร็จ/ลูกค้า/เลขพัสดุ/ที่อยู่, status, ช่วงวันที่ (by = bill: วันที่ตัดบิลของใบเสร็จในซอง | sent)
+// ตัวกรอง: q = ค้นเลขใบเสร็จ/ลูกค้า/เลขพัสดุ/ที่อยู่, status, company, ช่วงวันที่ส่ง (from/to)
 function listFilter(q) {
   const where = ['p.deleted = 0'], args = [];
   const text = str(q.q, 100);
@@ -392,15 +390,8 @@ function listFilter(q) {
   }
   if (STATUSES.includes(q.status)) { where.push('p.status = ?'); args.push(q.status); }
   if (Number(q.company)) { where.push('p.company_id = ?'); args.push(Number(q.company)); }
-  if (q.by === 'sent') {
-    if (isDate(q.from)) { where.push('p.sent_date >= ?'); args.push(q.from); }
-    if (isDate(q.to)) { where.push(`p.sent_date <= ? AND p.sent_date <> ''`); args.push(q.to); }
-  } else if (isDate(q.from) || isDate(q.to)) {
-    const c = ['r.parcel_id = p.id'];
-    if (isDate(q.from)) { c.push('r.bill_date >= ?'); args.push(q.from); }
-    if (isDate(q.to)) { c.push('r.bill_date <= ?'); args.push(q.to); }
-    where.push(`EXISTS (SELECT 1 FROM parcel_receipts r WHERE ${c.join(' AND ')})`);
-  }
+  if (isDate(q.from)) { where.push('p.sent_date >= ?'); args.push(q.from); }
+  if (isDate(q.to)) { where.push(`p.sent_date <= ? AND p.sent_date <> ''`); args.push(q.to); }
   return { sql: where.join(' AND '), args };
 }
 const ORDER = `ORDER BY CASE p.status WHEN 'pending' THEN 0 ELSE 1 END, COALESCE(NULLIF(p.sent_date, ''), p.created_at) DESC, p.id DESC`;
@@ -517,7 +508,6 @@ function receiptsDiff(a, b) {
     const o = A.get(r.receipt_no);
     if (!o) continue;
     const ch = [];
-    if (o.bill_date !== r.bill_date) ch.push(`วันที่ตัดบิล ${o.bill_date} → ${r.bill_date}`);
     if ((o.customer || '') !== (r.customer || '')) ch.push(`ลูกค้า "${o.customer || '(ผู้รับซอง)'}" → "${r.customer || '(ผู้รับซอง)'}"`);
     if ((o.amount ?? null) !== (r.amount ?? null)) ch.push(`ยอดเงิน ${fmtSatang(o.amount)} → ${fmtSatang(r.amount)}`);
     if ((o.detail || '') !== (r.detail || '')) ch.push(`รายละเอียดสินค้า "${o.detail || '-'}" → "${r.detail || '-'}"`);
@@ -563,6 +553,8 @@ app.put('/api/parcels/:id', auth, async (req, res) => {
   const body = { ...old, ...req.body };
   if (!req.body.receipts) body.receipts = old.receipts.map((r) => ({ ...r, amount: baht(r.amount) }));
   const reason = str(req.body.edit_reason, 300);
+  const oldBill = new Map(old.receipts.map((r) => [r.receipt_no, r.bill_date]));
+  body.receipts = body.receipts.map((r) => ({ ...r, bill_date: r.bill_date || oldBill.get(String(r?.receipt_no ?? '').trim()) || '' }));
   const np = parcelInput(body);
   await checkCompany(np.company_id, old.company_id);
   const stmts = updateStatements(old, np, req.user.id, now(), reason);
@@ -638,12 +630,12 @@ STATUS_FROM_TH[normHead('ได้รับแล้ว')] = 'received';
 app.get('/api/import-template.xlsx', auth, (req, res) => {
   const addr = '99/1 ถ.สุขุมวิท แขวงคลองเตย เขตคลองเตย กรุงเทพฯ 10110';
   const ws = XLSX.utils.aoa_to_sheet([
-    ['เลขที่ใบเสร็จ', 'วันที่ตัดบิล', 'ชื่อลูกค้า', 'รายละเอียดสินค้า', 'ยอดเงิน', 'วันที่ส่ง', 'ส่งไปที่', 'ส่งทาง', 'เลขพัสดุ', 'หมายเหตุ'],
-    ['RC0001', '01/11/2569', 'บริษัท ตัวอย่าง จำกัด', 'หนังสือเรียน ป.1 จำนวน 50 เล่ม', 12500, '05/11/2569', addr, 'ไปรษณีย์ไทย (EMS)', 'EF123456789TH', 'ใบเสร็จที่เลขพัสดุเดียวกัน = ซองเดียวกัน'],
-    ['RC0002', '01/11/2569', 'บริษัท ตัวอย่าง จำกัด', 'แบบฝึกหัด ป.2', 3480.5, '05/11/2569', addr, 'ไปรษณีย์ไทย (EMS)', 'EF123456789TH', ''],
-    ['RC0003', '03/11/2569', 'ร้านตัวอย่าง', '', 990, '', '', '', '', 'ยังไม่ส่ง เว้นวันที่ส่งไว้'],
+    ['เลขที่ใบเสร็จ', 'ชื่อลูกค้า', 'รายละเอียดสินค้า', 'ยอดเงิน', 'วันที่ส่ง', 'ส่งไปที่', 'ส่งทาง', 'เลขพัสดุ', 'หมายเหตุ'],
+    ['RC0001', 'บริษัท ตัวอย่าง จำกัด', 'หนังสือเรียน ป.1 จำนวน 50 เล่ม', 12500, '05/11/2569', addr, 'ไปรษณีย์ไทย (EMS)', 'EF123456789TH', 'ใบเสร็จที่เลขพัสดุเดียวกัน = ซองเดียวกัน'],
+    ['RC0002', 'บริษัท ตัวอย่าง จำกัด', 'แบบฝึกหัด ป.2', 3480.5, '05/11/2569', addr, 'ไปรษณีย์ไทย (EMS)', 'EF123456789TH', ''],
+    ['RC0003', 'ร้านตัวอย่าง', '', 990, '', '', '', '', 'ยังไม่ส่ง เว้นวันที่ส่งไว้'],
   ]);
-  ws['!cols'] = [16, 14, 30, 34, 14, 14, 44, 20, 18, 36].map((wch) => ({ wch }));
+  ws['!cols'] = [16, 30, 34, 14, 14, 44, 20, 18, 36].map((wch) => ({ wch }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'ใบเสร็จ');
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -673,7 +665,7 @@ app.post('/api/import', auth, async (req, res) => {
   if (!best) fail(400, 'ไม่พบหัวคอลัมน์ "เลขที่ใบเสร็จ" ในไฟล์ (ดูตัวอย่างจากไฟล์แม่แบบ)');
   const { name: sheetName, grid, headIdx } = best;
   const map = mapHeader(grid[headIdx]);
-  const missing = ['bill_date', 'customer'].filter((k) => !(k in map));
+  const missing = ['customer'].filter((k) => !(k in map));
   if (missing.length && !update) fail(400, `ไม่พบคอลัมน์ ${missing.map((k) => `"${IMPORT_COLS[k][0]}"`).join(', ')} (ถ้าต้องการเติมข้อมูลให้รายการเดิม เลือก "อัปเดตรายการเดิม")`);
 
   // ใบเสร็จที่มีอยู่แล้ว → ซองที่ใบเสร็จนั้นอยู่ (ล่าสุด)
@@ -722,8 +714,7 @@ app.post('/api/import', auth, async (req, res) => {
         updates.set(old.id, u);
         continue;
       }
-      if (update && (!v.bill_date || !v.customer)) fail(400, 'ไม่พบเลขที่ใบเสร็จนี้ในระบบ (และไม่มีวันที่ตัดบิล/ชื่อลูกค้าพอจะเพิ่มเป็นรายการใหม่)');
-      if (!v.bill_date) fail(400, 'ไม่มีวันที่ตัดบิล');
+      if (update && !v.customer) fail(400, 'ไม่พบเลขที่ใบเสร็จนี้ในระบบ (และไม่มีชื่อลูกค้าพอจะเพิ่มเป็นรายการใหม่)');
       if (!v.customer) fail(400, 'ไม่มีชื่อลูกค้า');
       v.company_id ||= defaultCompany;
       if (!v.company_id) fail(400, 'ไม่ได้ระบุบริษัทผู้ส่ง (เลือกในหน้าต่างนำเข้า หรือใส่คอลัมน์ "บริษัทผู้ส่ง")');
@@ -843,12 +834,12 @@ app.get('/api/export.xlsx', auth, async (req, res) => {
   const f = listFilter(req.query);
   const rows = await withReceipts(await db.all(`SELECT ${PARCEL_COLS} ${PARCEL_FROM} WHERE ${f.sql} ${ORDER}`, ...f.args));
   const coName = Object.fromEntries((await db.all('SELECT id, name FROM companies')).map((c) => [c.id, c.name]));
-  const aoa = [['ซองที่', 'บริษัทผู้ส่ง', 'เลขที่ใบเสร็จ', 'ชื่อลูกค้า', 'วันที่ตัดบิล', 'ยอดเงิน', 'รายละเอียดสินค้า', 'ส่งถึง', 'วันที่ส่ง', 'ส่งไปที่', 'ส่งทาง', 'เลขพัสดุ', 'สถานะ', 'หมายเหตุ', 'ผู้บันทึก']];
+  const aoa = [['ซองที่', 'บริษัทผู้ส่ง', 'เลขที่ใบเสร็จ', 'ชื่อลูกค้า', 'ยอดเงิน', 'รายละเอียดสินค้า', 'ส่งถึง', 'วันที่ส่ง', 'ส่งไปที่', 'ส่งทาง', 'เลขพัสดุ', 'สถานะ', 'หมายเหตุ', 'ผู้บันทึก']];
   for (const p of rows) for (const r of p.receipts)
-    aoa.push([p.id, coName[p.company_id] || '', r.receipt_no, r.customer || p.customer, thDate(r.bill_date), r.amount == null ? '' : r.amount / 100, r.detail, p.customer, thDate(p.sent_date), p.destination, p.carrier, p.tracking_no, STATUS_TH[p.status], p.note, p.created_name]);
+    aoa.push([p.id, coName[p.company_id] || '', r.receipt_no, r.customer || p.customer, r.amount == null ? '' : r.amount / 100, r.detail, p.customer, thDate(p.sent_date), p.destination, p.carrier, p.tracking_no, STATUS_TH[p.status], p.note, p.created_name]);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [7, 28, 16, 32, 12, 14, 36, 32, 12, 50, 22, 18, 16, 30, 18].map((wch) => ({ wch }));
-  for (let i = 1; i < aoa.length; i++) { const c = ws[XLSX.utils.encode_cell({ r: i, c: 5 })]; if (c && c.t === 'n') c.z = '#,##0.00'; }
+  ws['!cols'] = [7, 28, 16, 32, 14, 36, 32, 12, 50, 22, 18, 16, 30, 18].map((wch) => ({ wch }));
+  for (let i = 1; i < aoa.length; i++) { const c = ws[XLSX.utils.encode_cell({ r: i, c: 4 })]; if (c && c.t === 'n') c.z = '#,##0.00'; }
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'การส่งใบเสร็จ');
   const name = `receipt-mail_${new Date().toISOString().slice(0, 10)}.xlsx`;
