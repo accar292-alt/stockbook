@@ -112,15 +112,16 @@ table.rtable input.r-no { min-width: 150px; }
 .stat small { font-size: .55em; font-weight: 400; color: var(--mute); }
 .stat .mute { display: block; }
 /* หน้าซอง (ขนาดจริงเป็นนิ้ว ตั้งจากค่าในระบบ) */
-.env-page { position: relative; overflow: hidden; background: #fff; color: #000; font-family: "Sarabun", "Leelawadee UI", Tahoma, sans-serif; line-height: 1.35; }
+/* หน้าซอง: ฟอนต์ TH Sarabun New (ต้องติดตั้งในเครื่องที่สั่งพิมพ์ ถ้าไม่มีจะใช้ Sarabun แทน) */
+.env-page { position: relative; overflow: hidden; background: #fff; color: #000; font-family: "TH Sarabun New", "THSarabunNew", "TH SarabunPSK", "Sarabun", "Leelawadee UI", Tahoma, sans-serif; line-height: 1.15; }
 .env-inner { position: absolute; inset: 0; }
-.env-label { font-size: 10pt; color: #444; }
-.env-from { position: absolute; left: .55in; top: .45in; max-width: 45%; font-size: 12pt; }
-.env-to { position: absolute; left: 42%; top: 40%; right: .6in; font-size: 17pt; }
-.env-name { font-size: 20pt; font-weight: 700; }
+.env-label { font-size: 14pt; color: #444; }
+.env-from { position: absolute; left: .55in; top: .45in; max-width: 45%; font-size: 16pt; }
+.env-to { position: absolute; left: 42%; top: 40%; right: .6in; font-size: 18pt; } /* ชื่อ-ที่อยู่ผู้รับ 18pt */
+.env-name { font-size: 18pt; font-weight: 700; }
 .env-zip { display: flex; gap: 4px; margin-top: 8px; }
 .env-zip span { width: .38in; height: .44in; border: 1.5px solid #000; display: flex; align-items: center; justify-content: center; font-size: 18pt; font-weight: 700; }
-.env-ref { position: absolute; left: .55in; bottom: .35in; right: 50%; font-size: 8pt; color: #555; }
+.env-ref { position: absolute; left: .55in; bottom: .35in; right: 50%; font-size: 12pt; color: #555; }
 .env-preview { display: flex; flex-direction: column; gap: 12px; max-height: 60vh; overflow: auto; background: var(--bg); padding: 8px; border-radius: 8px; }
 .env-scale { position: relative; overflow: hidden; flex: none; }
 .env-scale > .env-page { transform-origin: 0 0; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
@@ -202,5 +203,8 @@ details.rcpts[open] summary { margin-bottom: 2px; }
 .company-pick { max-width: 460px; margin-bottom: 10px; }
 .company-pick select { font-weight: 600; }
 .co-tag { font-size: .75em; color: var(--pri); font-weight: 600; }
-.env-permit { position: absolute; top: .45in; right: .55in; border: 1.5px solid #000; padding: 6px 14px; text-align: center; font-size: 12pt; line-height: 1.5; background: #fff; color: #000; }
+.env-permit { position: absolute; top: .45in; right: .55in; border: 1.5px solid #000; padding: 4px 14px; text-align: center; font-size: 12pt; line-height: 1.25; /* กรอบ ปณ. 12pt */ background: #fff; color: #000; }
 .permit-preview .env-permit { position: static; display: inline-block; margin-top: 8px; }
+.sumtable tfoot td { font-weight: 700; border-top: 2px solid var(--line); background: var(--th, #eef2f5); }
+.sumtable td.num, .sumtable th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.sumtable tr.pending-row td { color: var(--wait); }
