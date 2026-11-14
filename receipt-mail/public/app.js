@@ -661,10 +661,8 @@ function slipHtml(p, opt) {
     : p.receipts;
   const showAmt = opt.amount && p.receipts.some((r) => r.amount != null); // แสดงยอดรายใบ ไม่แสดงยอดรวม
   const showCust = p.receipts.some((r) => r.customer && r.customer !== p.customer); // ลูกค้าคนละรายกับผู้รับ
-  const longDate = (d) => (d ? new Date(d + 'T00:00:00').toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' }) : '');
   return `<div class="slip-page">
-    <div class="slip-head"><div><div class="slip-org">${esc(co.name)}</div><div class="slip-small">${nl(co.address)}${co.phone ? `<br>โทร ${esc(co.phone)}` : ''}</div></div>
-      <div class="slip-date">วันที่ ${longDate(p.sent_date || today())}</div></div>
+    <div class="slip-head"><div><div class="slip-org">${esc(co.name)}</div><div class="slip-small">${nl(co.address)}${co.phone ? `<br>โทร ${esc(co.phone)}` : ''}</div></div></div>
     <h1 class="slip-title">รายการใบเสร็จรับเงินที่จัดส่ง</h1>
     <table class="slip-info"><tr><th>เรียน</th><td><b>${esc(p.customer)}</b>${p.destination ? `<br>${nl(p.destination)}` : ''}</td></tr>
       ${p.carrier || p.tracking_no ? `<tr><th>จัดส่งทาง</th><td>${esc(p.carrier) || '-'}${p.tracking_no ? ` &nbsp; เลขพัสดุ <b>${esc(p.tracking_no)}</b>` : ''}</td></tr>` : ''}</table>

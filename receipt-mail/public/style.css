@@ -142,7 +142,6 @@ table.rtable input.r-no { min-width: 150px; }
 .slip-head { display: flex; justify-content: space-between; gap: 16px; border-bottom: 1.5px solid #000; padding-bottom: 8px; }
 .slip-org { font-size: 18pt; font-weight: 700; }
 .slip-small { font-size: 16pt; color: #333; }
-.slip-date { white-space: nowrap; }
 .slip-title { font-size: 20pt; text-align: center; margin: 14px 0 10px; }
 .slip-info { border-collapse: collapse; margin-bottom: 6px; width: auto; background: none; }
 .slip-info th { text-align: left; vertical-align: top; padding: 2px 14px 2px 0; font-weight: 600; white-space: nowrap; background: none; font-size: inherit; border: 0; color: #000; }
