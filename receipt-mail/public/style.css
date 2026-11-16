@@ -279,3 +279,13 @@ table.mf-edit .mf-n { color: var(--mute); text-align: right; }
 .mf-desc { margin-bottom: 2mm; }
 .mf-permit { flex: none; }
 .mf-permit .env-permit { white-space: nowrap; }
+/* หัวใบนำส่ง: ซ้าย = บริษัท [กรอบใบอนุญาต] / หัวเรื่อง / คำบรรยาย · ขวา = วัน/เดือน/ปี ... */
+.mf-page .mf-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 4mm; margin: 0 0 3mm; }
+.mf-left { flex: 1; min-width: 0; }
+.mf-row1 { display: flex; justify-content: space-between; align-items: flex-start; gap: 4mm; margin-bottom: 2mm; }
+.mf-row1 .mf-co { margin: 2mm 0 0; }
+.mf-page .mf-title { font-size: 15pt; margin-bottom: 1mm; }
+.mf-page .mf-desc { margin: 0; }
+.mf-meta { flex: none; }
+.mf-meta td { min-width: 40mm; }
+.mf-page table.mf-meta { width: auto; }
