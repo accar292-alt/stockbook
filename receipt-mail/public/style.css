@@ -209,3 +209,97 @@ details.rcpts[open] summary { margin-bottom: 2px; }
 .sumtable td.num, .sumtable th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .sumtable tr.pending-row td { color: var(--wait); }
 .slip-contact { white-space: nowrap; }
+
+/* ใบนำส่งไปรษณีย์: ตารางแก้ไข */
+table.mf-edit td { padding: 3px 4px; vertical-align: top; }
+table.mf-edit input, table.mf-edit select { min-width: 0; padding: 5px 6px; }
+table.mf-edit .mf-rec { min-width: 180px; } table.mf-edit .mf-dest { width: 110px; } table.mf-edit .mf-trk { width: 150px; font-family: ui-monospace, Consolas, monospace; }
+table.mf-edit .mf-pst { width: 90px; text-align: right; } table.mf-edit .mf-note { width: 120px; }
+table.mf-edit tr.off td { opacity: .45; }
+table.mf-edit .mf-n { color: var(--mute); text-align: right; }
+/* ใบนำส่งไปรษณีย์: แบบฟอร์มพิมพ์ A4 */
+.mf-page { width: 210mm; min-height: 297mm; padding: 10mm 10mm 10mm 12mm; background: #fff; color: #10204a; font-family: "TH Sarabun New", "THSarabunNew", "TH SarabunPSK", "Sarabun", Tahoma, sans-serif; font-size: 14pt; line-height: 1.2; }
+.mf-page table { border-collapse: collapse; background: none; }
+.mf-page th, .mf-page td { color: #10204a; background: none; font-size: 14pt; padding: 2px 6px; }
+.mf-top { display: flex; justify-content: space-between; margin-bottom: 6mm; }
+.mf-head { display: flex; justify-content: space-between; gap: 10mm; margin-bottom: 3mm; }
+.mf-co { font-size: 18pt; font-weight: 700; margin-bottom: 2mm; }
+.mf-title { font-size: 16pt; font-weight: 700; margin-bottom: 2mm; }
+.mf-meta th { text-align: left; font-weight: 400; white-space: nowrap; border: 0; padding: 0 6px 0 0; }
+.mf-meta td { border: 0; border-bottom: 1px dotted #10204a; min-width: 45mm; padding: 0 4px; }
+.mf-list { width: 100%; }
+.mf-list th, .mf-list td { border: 1px solid #10204a; }
+.mf-list th { font-weight: 600; text-align: center; }
+.mf-list tbody td { height: 8.5mm; }
+.mf-list .c { text-align: center; width: 8mm; }
+.mf-list .num, .mf-sum .num, .mf-carry .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mf-list .mono { font-family: inherit; letter-spacing: .5px; }
+.mf-list .mf-hint { font-size: 13pt; vertical-align: top; }
+.mf-list tr { break-inside: avoid; }
+.mf-bottom { display: flex; gap: 6mm; margin-top: 4mm; break-inside: avoid; }
+.mf-sumbox { flex: 1.15; }
+.mf-sumtitle { font-weight: 700; }
+.mf-sum { width: 100%; }
+.mf-sum th, .mf-sum td { border: 1px solid #10204a; }
+.mf-sum tbody th { text-align: left; font-weight: 600; }
+.mf-sum td.c { text-align: center; }
+.mf-carry { width: 100%; margin-top: 2mm; }
+.mf-carry th { text-align: left; font-weight: 600; border: 1px solid #10204a; border-right: 0; }
+.mf-carry td { border-top: 1px solid #10204a; border-bottom: 1px solid #10204a; }
+.mf-carry td:last-child { border-right: 1px solid #10204a; width: 10mm; }
+.mf-side { flex: 1; display: flex; flex-direction: column; gap: 5mm; }
+.mf-sign { text-align: center; }
+.mf-stampwrap { display: flex; gap: 4mm; align-items: center; }
+.mf-stamp { width: 30mm; height: 26mm; border: 1.5px solid #10204a; border-radius: 6mm; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 2mm; flex: none; }
+.env-scale > .mf-page { transform-origin: 0 0; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+#printArea .mf-page { width: auto; min-height: 0; padding: 0; box-shadow: none; }
+.mf-head { display: grid; grid-template-columns: 1fr auto; gap: 8mm; }
+.mf-meta td { min-width: 50mm; }
+.mf-list { table-layout: fixed; }
+.mf-list td, .mf-list th { overflow-wrap: anywhere; }
+.mf-list td.c, .mf-list th { white-space: nowrap; }
+.mf-list th { white-space: normal; }
+.mf-list tbody td:nth-child(4) { white-space: nowrap; text-align: center; }
+.mf-small { font-size: 12pt !important; }
+.mf-stamp { width: 26mm; height: 22mm; }
+.mf-list th, .mf-list td { font-size: 13pt; padding: 2px 4px; }
+.mf-list tbody td:nth-child(5) { white-space: nowrap; letter-spacing: 0; }
+.mf-meta { border-collapse: separate; border-spacing: 0 3px; }
+.mf-meta th { padding-right: 10px; }
+.mf-signs { display: flex; justify-content: space-between; align-items: center; gap: 6mm; margin-top: 8mm; break-inside: avoid; }
+.mf-signs .mf-sign { flex: 1; }
+.mf-signs .mf-stamp { width: 30mm; height: 24mm; white-space: nowrap; font-size: 12pt; }
+.mf-head { grid-template-columns: 1fr auto auto; align-items: start; gap: 5mm; }
+.mf-permit .env-permit { position: static; font-size: 12pt; color: #000; }
+.mf-round { display: flex; gap: 6px; }
+.mf-round span { display: inline-block; min-width: 18mm; }
+.mf-meta td.mf-round { border-bottom: 0; }
+.mf-meta td.mf-round span { border-bottom: 1px dotted #10204a; }
+.mf-head { display: flex; justify-content: flex-end; align-items: flex-start; gap: 8mm; margin: 2mm 0 2mm; }
+.mf-desc { margin-bottom: 2mm; }
+.mf-permit { flex: none; }
+.mf-permit .env-permit { white-space: nowrap; }
+/* หัวใบนำส่ง: ซ้าย = บริษัท [กรอบใบอนุญาต] / หัวเรื่อง / คำบรรยาย · ขวา = วัน/เดือน/ปี ... */
+.mf-page .mf-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 4mm; margin: 0 0 3mm; }
+.mf-left { flex: 1; min-width: 0; }
+.mf-row1 { display: flex; justify-content: space-between; align-items: flex-start; gap: 4mm; margin-bottom: 2mm; }
+.mf-row1 .mf-co { margin: 2mm 0 0; }
+.mf-page .mf-title { font-size: 15pt; margin-bottom: 1mm; }
+.mf-page .mf-desc { margin: 0; }
+.mf-meta { flex: none; }
+.mf-meta td { min-width: 40mm; }
+.mf-page table.mf-meta { width: auto; }
+/* ส่วนล่างใบนำส่ง (เว้นว่างไว้เขียนเอง) */
+.mf-sum tbody td { height: 7mm; }
+.mf-sum th, .mf-sum td { font-size: 13pt; }
+.mf-carry td.mf-dots { width: 30mm; border-bottom: 1px dotted #10204a; }
+.mf-words { display: inline-block; width: 60mm; border-bottom: 1px dotted #10204a; height: 1em; vertical-align: bottom; }
+.mf-stampwrap .mf-stamp { width: 26mm; height: 24mm; white-space: nowrap; font-size: 12pt; }
+.mf-carry td.mf-dots { border-bottom: 1px solid #10204a; text-align: right; color: #10204a; }
+/* เล่มที่/เลขที่ มุมบน: เว้นที่ไว้เขียนตัวเลข และขยับเลขที่เข้ามาจากขอบขวา */
+.mf-top .mf-fill { display: inline-block; min-width: 32mm; border-bottom: 1px dotted #10204a; text-align: center; }
+.mf-top .mf-docno { margin-right: 12mm; }
+.mf-list tbody td:nth-child(3) { text-align: center; letter-spacing: 1px; }
+/* ตารางรายการใบนำส่ง: ตัวหนังสือกึ่งกลางแนวตั้ง และใหญ่ขึ้น 1 ระดับ (14pt) */
+.mf-page .mf-list th, .mf-page .mf-list td { vertical-align: middle; font-size: 14pt; }
+.mf-page .mf-list .mf-hint, .mf-page .mf-list .mf-small { font-size: 13pt !important; }

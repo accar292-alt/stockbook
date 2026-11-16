@@ -90,6 +90,16 @@ const SCHEMA = `
     id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, address TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '',
     active INTEGER NOT NULL DEFAULT 1
   );
+  -- ใบนำส่งสิ่งของทางไปรษณีย์โดยชำระค่าบริการเป็นเงินสินเชื่อ (1 ใบ = 1 บริษัท 1 ครั้งที่ฝากส่ง)
+  -- rows = รายการที่พิมพ์ (JSON: parcel_id, recipient, dest, service, tracking, postage สตางค์, note)
+  CREATE TABLE IF NOT EXISTS manifests (
+    id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL REFERENCES companies(id), sent_date TEXT NOT NULL,
+    round_no INTEGER NOT NULL DEFAULT 1, book_no TEXT NOT NULL DEFAULT '', doc_no TEXT NOT NULL DEFAULT '',
+    dept TEXT NOT NULL DEFAULT '', permit_no TEXT NOT NULL DEFAULT '', post_office TEXT NOT NULL DEFAULT '',
+    carried_in INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL DEFAULT 0, rows TEXT NOT NULL,
+    created_by INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_manifest_company ON manifests(company_id, sent_date);
   CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   INSERT OR IGNORE INTO settings VALUES ('org_name', 'บริษัทของฉัน');
 `;
@@ -110,6 +120,8 @@ const ensureReady = () => (ready ??= (async () => {
     // บริษัทผู้ส่ง: ครั้งแรกสร้างบริษัทแรกจากชื่อ/ที่อยู่ผู้ส่งที่ตั้งไว้เดิม แล้วให้ซองเดิมทั้งหมดเป็นของบริษัทนี้
     const pcols = (await db.all(`SELECT name FROM pragma_table_info('parcels')`)).map((c) => c.name);
     if (!pcols.includes('company_id')) await db.run('ALTER TABLE parcels ADD COLUMN company_id INTEGER REFERENCES companies(id)');
+    // ค่าบริการไปรษณีย์ของซอง (สตางค์, NULL = ยังไม่ทราบ)
+    if (!pcols.includes('postage')) await db.run('ALTER TABLE parcels ADD COLUMN postage INTEGER');
     // ใบอนุญาตชำระค่าฝากส่งเป็นรายเดือน (แต่ละบริษัทเลขไม่เหมือนกัน) พิมพ์เป็นกรอบมุมขวาบนของหน้าซอง
     const ccols = (await db.all(`SELECT name FROM pragma_table_info('companies')`)).map((c) => c.name);
     if (!ccols.includes('permit_no')) await db.run(`ALTER TABLE companies ADD COLUMN permit_no TEXT NOT NULL DEFAULT ''`);
@@ -154,7 +166,10 @@ const setting = async (key) => (await db.get('SELECT value FROM settings WHERE k
 
 const STATUSES = ['pending', 'sent', 'received', 'returned'];
 const STATUS_TH = { pending: 'รอส่ง', sent: 'ส่งแล้ว', received: 'ลูกค้าได้รับแล้ว', returned: 'ตีกลับ' };
-const CARRIERS = ['ไปรษณีย์ไทย (EMS)', 'ไปรษณีย์ไทย (ลงทะเบียน)', 'Kerry Express', 'Flash Express', 'J&T Express', 'ส่งเอง/แมสเซนเจอร์', 'อีเมล', 'อื่น ๆ'];
+// ประเภทบริการตามแบบฟอร์มใบนำส่งไปรษณีย์ (ช่อง "ส่งทาง" ของซองเก็บเป็น "ไปรษณีย์ไทย (ประเภท)")
+const POST_SERVICES = ['ลงทะเบียน', 'รับรอง', 'EMS', 'รับประกัน', 'พัสดุ', 'พกง.', 'ธรรมดา'];
+const serviceOf = (carrier) => { const m = /^ไปรษณีย์ไทย\s*\((.+)\)\s*$/.exec(carrier || ''); return m && POST_SERVICES.includes(m[1]) ? m[1] : ''; };
+const CARRIERS = [...POST_SERVICES.map((x) => `ไปรษณีย์ไทย (${x})`), 'Kerry Express', 'Flash Express', 'J&T Express', 'ส่งเอง/แมสเซนเจอร์', 'อีเมล', 'อื่น ๆ'];
 
 const normTracking = (v) => str(v, 60).toUpperCase().replace(/\s+/g, '');
 // ยอดเงิน: รับ "1,234.50", 1234.5, "1234 บาท" → สตางค์ (จำนวนเต็ม); ว่าง = null; อ่านไม่ได้ = undefined
@@ -166,7 +181,7 @@ function parseAmount(v) {
   return Math.round(n * 100);
 }
 const baht = (satang) => (satang == null ? null : satang / 100);
-const PARCEL_FIELDS = ['company_id', 'customer', 'destination', 'sent_date', 'carrier', 'tracking_no', 'status', 'note'];
+const PARCEL_FIELDS = ['company_id', 'customer', 'destination', 'sent_date', 'carrier', 'tracking_no', 'postage', 'status', 'note'];
 
 // ตรวจข้อมูลซอง + รายการใบเสร็จในซอง
 function parcelInput(body) {
@@ -178,7 +193,9 @@ function parcelInput(body) {
     carrier: str(body.carrier, 60),
     tracking_no: normTracking(body.tracking_no),
     note: str(body.note, 500),
+    postage: parseAmount(body.postage),
   };
+  if (p.postage === undefined) fail(400, `ค่าบริการ "${body.postage}" ไม่ถูกต้อง`);
   if (!p.company_id) fail(400, 'เลือกบริษัทผู้ส่ง');
   if (!p.customer) fail(400, 'กรอกชื่อลูกค้า');
   if (p.sent_date && !isDate(p.sent_date)) fail(400, 'วันที่ส่งไม่ถูกต้อง');
@@ -256,7 +273,7 @@ async function envelopeSettings() {
 
 app.get('/api/state', async (req, res) => {
   const needSetup = (await db.get('SELECT COUNT(*) c FROM users')).c === 0;
-  res.json({ needSetup, user: req.user || null, orgName: await setting('org_name'), carriers: CARRIERS, statuses: STATUS_TH,
+  res.json({ needSetup, user: req.user || null, orgName: await setting('org_name'), carriers: CARRIERS, statuses: STATUS_TH, postServices: POST_SERVICES,
     companies: req.user ? await db.all('SELECT id, name, address, phone, permit_no, permit_office, contact, active FROM companies ORDER BY id') : [],
     envelope: req.user ? await envelopeSettings() : null });
 });
@@ -374,7 +391,7 @@ app.put('/api/settings', admin, async (req, res) => {
 });
 
 // ---------- parcels ----------
-const PARCEL_COLS = `p.id, p.company_id, p.customer, p.destination, p.sent_date, p.carrier, p.tracking_no, p.status, p.note,
+const PARCEL_COLS = `p.id, p.company_id, p.customer, p.destination, p.sent_date, p.carrier, p.tracking_no, p.postage, p.status, p.note,
   p.created_at, p.updated_at, cu.name AS created_name, uu.name AS updated_name,
   (SELECT COUNT(*) FROM parcel_edits e WHERE e.parcel_id = p.id) AS edit_count`;
 const PARCEL_FROM = `FROM parcels p JOIN users cu ON cu.id = p.created_by LEFT JOIN users uu ON uu.id = p.updated_by`;
@@ -399,7 +416,10 @@ function listFilter(q) {
 const ORDER = `ORDER BY CASE p.status WHEN 'pending' THEN 0 ELSE 1 END, COALESCE(NULLIF(p.sent_date, ''), p.created_at) DESC, p.id DESC`;
 
 // ส่งยอดเงินออกทาง API เป็นบาท (ฐานข้อมูลเก็บเป็นสตางค์)
-const toBaht = (parcels) => { for (const p of parcels) for (const r of p.receipts) r.amount = baht(r.amount); return parcels; };
+const toBaht = (parcels) => {
+  for (const p of parcels) { p.postage = baht(p.postage); for (const r of p.receipts) r.amount = baht(r.amount); }
+  return parcels;
+};
 async function withReceipts(parcels) {
   if (!parcels.length) return parcels;
   const rs = await db.all(`SELECT parcel_id, receipt_no, bill_date, customer, amount, detail FROM parcel_receipts
@@ -482,9 +502,9 @@ async function rememberCustomer(p, update, userId) {
 
 const insertReceipts = (id, list) => list.map((r) => ({ sql: 'INSERT INTO parcel_receipts (parcel_id, receipt_no, bill_date, customer, amount, detail) VALUES (?, ?, ?, ?, ?, ?)',
   args: [id, r.receipt_no, r.bill_date, r.customer || '', r.amount ?? null, r.detail || ''] }));
-const INSERT_PARCEL = `INSERT INTO parcels (company_id, customer, destination, sent_date, carrier, tracking_no, status, note, created_by, created_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-const parcelArgs = (p) => [p.company_id, p.customer, p.destination, p.sent_date, p.carrier, p.tracking_no, p.status, p.note];
+const INSERT_PARCEL = `INSERT INTO parcels (company_id, customer, destination, sent_date, carrier, tracking_no, postage, status, note, created_by, created_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+const parcelArgs = (p) => [p.company_id, p.customer, p.destination, p.sent_date, p.carrier, p.tracking_no, p.postage ?? null, p.status, p.note];
 
 async function createParcel(p, userId, t = now()) {
   const tx = await client.transaction('write');
@@ -529,7 +549,7 @@ function updateStatements(old, p, userId, t, reason = '') {
   return [
     { sql: 'INSERT INTO parcel_edits (parcel_id, edited_by, edited_at, before, after, reason) VALUES (?, ?, ?, ?, ?, ?)',
       args: [old.id, userId, t, JSON.stringify(before), JSON.stringify(after), reason] },
-    { sql: `UPDATE parcels SET company_id = ?, customer = ?, destination = ?, sent_date = ?, carrier = ?, tracking_no = ?, status = ?, note = ?,
+    { sql: `UPDATE parcels SET company_id = ?, customer = ?, destination = ?, sent_date = ?, carrier = ?, tracking_no = ?, postage = ?, status = ?, note = ?,
               updated_by = ?, updated_at = ? WHERE id = ?`, args: [...parcelArgs(p), userId, t, old.id] },
     ...(changedReceipts ? [{ sql: 'DELETE FROM parcel_receipts WHERE parcel_id = ?', args: [old.id] }, ...insertReceipts(old.id, p.receipts)] : []),
   ];
@@ -552,7 +572,7 @@ app.put('/api/parcels/:id', auth, async (req, res) => {
   const old = await db.get('SELECT * FROM parcels WHERE id = ? AND deleted = 0', Number(req.params.id));
   if (!old) fail(404, 'ไม่พบรายการ');
   await withReceipts([old]);
-  const body = { ...old, ...req.body };
+  const body = { ...old, postage: baht(old.postage), ...req.body };
   if (!req.body.receipts) body.receipts = old.receipts.map((r) => ({ ...r, amount: baht(r.amount) }));
   const reason = str(req.body.edit_reason, 300);
   const oldBill = new Map(old.receipts.map((r) => [r.receipt_no, r.bill_date]));
@@ -591,6 +611,7 @@ const IMPORT_COLS = {
   note: ['หมายเหตุ', 'note', 'remark'],
   detail: ['รายละเอียดสินค้า', 'รายการสินค้า', 'รายละเอียด', 'สินค้า', 'description', 'product'],
   company: ['บริษัทผู้ส่ง', 'ส่งในนาม', 'ผู้ส่ง', 'sender'],
+  postage: ['ค่าบริการไปรษณีย์', 'ค่าบริการ', 'ค่าฝากส่ง', 'ค่าส่ง', 'postage'],
   amount: ['ยอดเงิน', 'จำนวนเงิน', 'ยอดรวม', 'ยอดชำระ', 'เงิน', 'amount', 'total'],
 };
 const normHead = (s) => String(s ?? '').toLowerCase().replace(/[\s._\-/()*:]/g, '');
@@ -699,6 +720,9 @@ app.post('/api/import', auth, async (req, res) => {
         v.company_id = co.id;
       }
       const tn = normTracking(get('tracking_no')); if (tn) v.tracking_no = tn;
+      const pst = parseAmount(get('postage'));
+      if (pst === undefined) fail(400, `ค่าบริการ "${get('postage')}" อ่านไม่ได้`);
+      if (pst != null) v.postage = pst / 100;
       const amt = parseAmount(get('amount'));
       if (amt === undefined) fail(400, `ยอดเงิน "${get('amount')}" อ่านไม่ได้`);
       const st = normHead(get('status'));
@@ -740,7 +764,7 @@ app.post('/api/import', auth, async (req, res) => {
     try {
       const receipts = u.old.receipts.map((r) => ({ ...r, bill_date: u.bills[r.receipt_no] || r.bill_date,
         amount: u.amounts?.[r.receipt_no] ?? r.amount, detail: u.details?.[r.receipt_no] ?? r.detail }));
-      const p = parcelInput({ ...u.old, ...u.v, status: u.v.status || u.old.status, receipts: receipts.map((r) => ({ ...r, amount: baht(r.amount) })) });
+      const p = parcelInput({ ...u.old, postage: baht(u.old.postage), ...u.v, status: u.v.status || u.old.status, receipts: receipts.map((r) => ({ ...r, amount: baht(r.amount) })) });
       if (updateStatements(u.old, p, 0, '').length) edits.push({ old: u.old, p, lines: u.lines }); else skipped += u.lines.length;
     } catch (e) { if (!(e instanceof HttpError)) throw e; errors.push({ line: u.lines[0], msg: `ซองของ ${u.old.customer}: ${e.message}` }); }
   }
@@ -817,6 +841,111 @@ app.post('/api/customers/import', auth, async (req, res) => {
       args: [c.address, c.phone, c.note, req.user.id, t, c.id] })),
   ], 'write');
   res.json({ ...summary, committed: true });
+});
+
+// ---------- ใบนำส่งไปรษณีย์ (ชำระค่าบริการเป็นเงินสินเชื่อ) ----------
+function destOf(address) {
+  // ปลายทาง = รหัสไปรษณีย์ 5 หลักของที่อยู่ผู้รับ (ตัวท้ายสุดที่เจอ)
+  const all = String(address || '').match(/(?<!\d)\d{5}(?!\d)/g);
+  return all ? all[all.length - 1] : '';
+}
+const manifestOut = (m) => ({ ...m, carried_in: m.carried_in / 100, total: m.total / 100,
+  rows: JSON.parse(m.rows).map((r) => ({ ...r, postage: baht(r.postage) })) });
+
+// ข้อมูลตั้งต้นของใบใหม่: ซองไปรษณีย์ไทยของบริษัทที่ส่งวันนั้น + หัวฟอร์มที่เดาให้ (ครั้งที่/ยอดยกมาในเดือนเดียวกัน)
+app.get('/api/manifest-draft', auth, async (req, res) => {
+  const company = Number(req.query.company), date = str(req.query.date, 10);
+  const co = await db.get('SELECT * FROM companies WHERE id = ?', company);
+  if (!co) fail(400, 'เลือกบริษัทผู้ส่ง');
+  if (!isDate(date)) fail(400, 'เลือกวันที่ฝากส่ง');
+  const parcels = await db.all(`SELECT id, customer, destination, carrier, tracking_no, postage, note FROM parcels
+    WHERE deleted = 0 AND company_id = ? AND sent_date = ? AND carrier LIKE 'ไปรษณีย์ไทย%' ORDER BY id`, company, date);
+  // ซองที่อยู่ในใบนำส่งที่บันทึกไปแล้ว
+  const saved = await db.all('SELECT id, sent_date, rows FROM manifests WHERE company_id = ?', company);
+  const inManifest = new Map();
+  for (const m of saved) for (const r of JSON.parse(m.rows)) if (r.parcel_id) inManifest.set(r.parcel_id, m.sent_date);
+  const month = date.slice(0, 7);
+  const prev = await db.get(`SELECT * FROM manifests WHERE company_id = ? AND substr(sent_date, 1, 7) = ? AND sent_date <= ?
+    ORDER BY sent_date DESC, id DESC LIMIT 1`, company, month, date);
+  const count = (await db.get(`SELECT COUNT(*) c FROM manifests WHERE company_id = ? AND substr(sent_date, 1, 7) = ? AND sent_date <= ?`, company, month, date)).c;
+  const last = await db.get('SELECT book_no, doc_no, dept FROM manifests WHERE company_id = ? ORDER BY id DESC LIMIT 1', company);
+  const nextDoc = last && /^\d+$/.test(last.doc_no) ? String(Number(last.doc_no) + 1).padStart(last.doc_no.length, '0') : '';
+  res.json({
+    rows: parcels.map((p) => ({ parcel_id: p.id, recipient: p.customer, dest: destOf(p.destination), service: serviceOf(p.carrier),
+      tracking: p.tracking_no, postage: baht(p.postage), note: '', in_round: inManifest.get(p.id) || null })),
+    header: { round_no: count + 1, carried_in: prev ? (prev.carried_in + prev.total) / 100 : 0, book_no: last?.book_no || '',
+      doc_no: nextDoc, dept: last?.dept || '', permit_no: co.permit_no, post_office: co.permit_office },
+  });
+});
+
+app.get('/api/manifests', auth, async (req, res) => {
+  const where = [], args = [];
+  if (Number(req.query.company)) { where.push('m.company_id = ?'); args.push(Number(req.query.company)); }
+  const rows = await db.all(`SELECT m.*, u.name AS created_name FROM manifests m JOIN users u ON u.id = m.created_by
+    ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY m.sent_date DESC, m.id DESC LIMIT 200`, ...args);
+  res.json(rows.map((m) => { const o = manifestOut(m); o.count = o.rows.length; delete o.rows; return o; }));
+});
+app.get('/api/manifests/:id', auth, async (req, res) => {
+  const m = await db.get('SELECT m.*, u.name AS created_name FROM manifests m JOIN users u ON u.id = m.created_by WHERE m.id = ?', Number(req.params.id));
+  if (!m) fail(404, 'ไม่พบใบนำส่ง');
+  const out = manifestOut(m);
+  // ใบที่บันทึกก่อนเปลี่ยนปลายทางเป็นรหัสไปรษณีย์ (ปลายทางเป็นชื่อจังหวัด) → ใช้รหัสไปรษณีย์จากที่อยู่ของซอง
+  for (const r of out.rows) {
+    if (!r.parcel_id || /^\d{5}$/.test(r.dest || '')) continue;
+    const p = await db.get('SELECT destination FROM parcels WHERE id = ?', r.parcel_id);
+    const zip = p && destOf(p.destination);
+    if (zip) r.dest = zip;
+  }
+  res.json(out);
+});
+
+// บันทึกใบนำส่ง และอัปเดตค่าบริการ/ประเภทบริการกลับไปที่ซอง (เก็บประวัติการแก้ไขของซองด้วย)
+app.post('/api/manifests', auth, async (req, res) => {
+  const b = req.body, company_id = Number(b.company_id);
+  if (!(await db.get('SELECT 1 FROM companies WHERE id = ?', company_id))) fail(400, 'เลือกบริษัทผู้ส่ง');
+  if (!isDate(b.sent_date)) fail(400, 'เลือกวันที่ฝากส่ง');
+  const carried = parseAmount(b.carried_in);
+  if (carried === undefined) fail(400, 'ยอดรวมยกมาไม่ถูกต้อง');
+  const list = Array.isArray(b.rows) ? b.rows.slice(0, 500) : [];
+  const rows = list.map((r, i) => {
+    // ใบนำส่งไม่ระบุราคา (ค่าบริการว่าง) — ถ้าส่งมาจะเก็บไว้ แต่ไม่บังคับ
+    const postage = r.postage === undefined ? null : parseAmount(r.postage);
+    if (postage === undefined) fail(400, `แถว ${i + 1}: ค่าบริการ "${r.postage}" ไม่ถูกต้อง`);
+    const service = POST_SERVICES.includes(r.service) ? r.service : '';
+    return { parcel_id: Number(r.parcel_id) || null, recipient: str(r.recipient, 200), dest: str(r.dest, 100), service,
+      tracking: normTracking(r.tracking), postage, note: str(r.note, 200) };
+  }).filter((r) => r.recipient || r.tracking);
+  if (!rows.length) fail(400, 'ไม่มีรายการในใบนำส่ง');
+  const total = rows.reduce((t, r) => t + (r.postage || 0), 0);
+  const round_no = Math.max(1, Math.min(999, Number(b.round_no) || 1)), t = now();
+  const stmts = [{ sql: `INSERT INTO manifests (company_id, sent_date, round_no, book_no, doc_no, dept, permit_no, post_office, carried_in, total, rows, created_by, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args: [company_id, b.sent_date, round_no, str(b.book_no, 30), str(b.doc_no, 30), str(b.dept, 100),
+      str(b.permit_no, 100), str(b.post_office, 100), carried || 0, total, JSON.stringify(rows), req.user.id, t] }];
+  for (const r of rows) {
+    if (!r.parcel_id) continue;
+    const old = await db.get('SELECT * FROM parcels WHERE id = ? AND deleted = 0 AND company_id = ?', r.parcel_id, company_id);
+    if (!old) continue;
+    const carrier = r.service ? `ไปรษณีย์ไทย (${r.service})` : old.carrier;
+    const before = {}, after = {};
+    if (old.carrier !== carrier) { before.carrier = old.carrier; after.carrier = carrier; }
+    if (!Object.keys(before).length) continue;
+    stmts.push({ sql: 'INSERT INTO parcel_edits (parcel_id, edited_by, edited_at, before, after, reason) VALUES (?, ?, ?, ?, ?, ?)',
+      args: [old.id, req.user.id, t, JSON.stringify(before), JSON.stringify(after), `ใบนำส่งไปรษณีย์ วันที่ ${thDate(b.sent_date)}`] },
+    { sql: 'UPDATE parcels SET carrier = ?, updated_by = ?, updated_at = ? WHERE id = ?', args: [carrier, req.user.id, t, old.id] });
+  }
+  const tx = await client.transaction('write');
+  try {
+    const id = Number((await tx.execute(stmts[0])).lastInsertRowid);
+    for (const st of stmts.slice(1)) await tx.execute(st);
+    await tx.commit();
+    res.json({ ok: true, id });
+  } catch (e) { await tx.rollback().catch(() => {}); throw e; }
+  finally { tx.close(); }
+});
+app.delete('/api/manifests/:id', admin, async (req, res) => {
+  const r = await db.run('DELETE FROM manifests WHERE id = ?', Number(req.params.id));
+  if (!r.changes) fail(404, 'ไม่พบใบนำส่ง');
+  res.json({ ok: true });
 });
 
 // ---------- สรุปรายเดือน ----------
