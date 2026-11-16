@@ -242,7 +242,6 @@ function parcelFields(p = {}) {
         <label>สถานะ<select name="status"><option value="">อัตโนมัติ (ตามวันที่ส่ง)</option>${statusOpts}</select></label>
         <label>ส่งทาง<input name="carrier" list="carrierList" value="${esc(p.carrier)}" autocomplete="off"></label>
         <label>เลขพัสดุ<input name="tracking_no" value="${esc(p.tracking_no)}" autocomplete="off" placeholder="เช่น EF123456789TH"></label>
-        <label>ค่าบริการไปรษณีย์ (บาท)<input name="postage" inputmode="decimal" value="${p.postage == null || p.postage === '' ? '' : money(p.postage)}" autocomplete="off" placeholder="0.00"></label>
       </div>
       <label>ส่งไปที่ (ชื่อผู้รับ / ที่อยู่)<textarea name="destination" rows="3">${esc(p.destination)}</textarea></label>
       <div class="addr-hint" hidden></div>
@@ -808,26 +807,6 @@ function importDialog() {
 }
 
 // ---------- ใบนำส่งไปรษณีย์ (ชำระค่าบริการเป็นเงินสินเชื่อ) ----------
-// จำนวนเงินเป็นตัวหนังสือ เช่น 1,021.50 → หนึ่งพันยี่สิบเอ็ดบาทห้าสิบสตางค์
-function bahtText(n) {
-  const d = ['', 'หนึ่ง', 'สอง', 'สาม', 'สี่', 'ห้า', 'หก', 'เจ็ด', 'แปด', 'เก้า'], u = ['', 'สิบ', 'ร้อย', 'พัน', 'หมื่น', 'แสน'];
-  const read = (t, higher = false) => {
-    if (t.length > 6) return read(t.slice(0, -6)) + 'ล้าน' + read(t.slice(-6), true);
-    let out = '';
-    for (let i = 0; i < t.length; i++) {
-      const k = +t[i], pos = t.length - i - 1;
-      if (!k) continue;
-      if (pos === 0 && k === 1 && (higher || +t.slice(0, -1) > 0)) out += 'เอ็ด';
-      else if (pos === 1 && k === 2) out += 'ยี่';
-      else if (!(pos === 1 && k === 1)) out += d[k];
-      out += u[pos];
-    }
-    return out;
-  };
-  const [b, st] = Math.abs(n).toFixed(2).split('.');
-  const bi = b.replace(/^0+/, '');
-  return (bi ? read(bi) + 'บาท' : '') + (+st ? read(String(+st)) + 'สตางค์' : bi ? 'ถ้วน' : 'ศูนย์บาทถ้วน');
-}
 const longThDate = (d) => (d ? new Date(d + 'T00:00:00').toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' }) : '');
 const MF = { company: 0, date: '' };
 
@@ -835,7 +814,7 @@ async function manifestPage() {
   MF.company ||= lastCompanyId();
   MF.date ||= today();
   $('#main').innerHTML = `<h2>ใบนำส่งไปรษณีย์</h2>
-    <p class="mute">ใบนำส่งสิ่งของทางไปรษณีย์โดยชำระค่าบริการเป็นเงินสินเชื่อ · เลือกบริษัทและวันที่ฝากส่ง ระบบจะดึงซองที่ส่งทาง "ไปรษณีย์ไทย" ของวันนั้นมาให้ ตรวจ/แก้ แล้วบันทึกและพิมพ์</p>
+    <p class="mute">ใบนำส่งสิ่งของทางไปรษณีย์โดยชำระค่าบริการเป็นเงินสินเชื่อ · เลือกบริษัทและวันที่ฝากส่ง ระบบจะดึงซองที่ส่งทาง "ไปรษณีย์ไทย" ของวันนั้นมาให้ ตรวจ/แก้ แล้วบันทึกและพิมพ์ (ไม่ระบุราคา แสดงเฉพาะจำนวนชิ้น)</p>
     <div class="card"><div class="bar">
       <label>บริษัทผู้ส่ง<select id="mfCo">${companyOptions(MF.company)}</select></label>
       <label>วันที่ฝากส่ง<input id="mfDate" type="date" value="${MF.date}"></label>
@@ -854,7 +833,6 @@ const mfRow = (r = {}) => `<tr class="mfrow">
   <td><input class="mf-dest" value="${esc(r.dest)}" aria-label="ปลายทาง"></td>
   <td><select class="mf-svc" aria-label="ประเภทบริการ"><option value="">-</option>${S.postServices.map((x) => `<option ${x === r.service ? 'selected' : ''}>${x}</option>`).join('')}</select></td>
   <td><input class="mf-trk" value="${esc(r.tracking)}" aria-label="เลขที่บริการ"></td>
-  <td><input class="mf-pst" inputmode="decimal" value="${r.postage == null ? '' : money(r.postage)}" placeholder="0.00" aria-label="ค่าบริการ"></td>
   <td><input class="mf-note" value="${esc(r.note)}" aria-label="หมายเหตุ"></td>
   <td class="mf-pid" hidden>${r.parcel_id || ''}</td></tr>`;
 
@@ -873,10 +851,9 @@ async function loadDraft() {
       <label>ใบอนุญาตเลขที่<input name="permit_no" value="${esc(h.permit_no)}"></label>
       <label>ศฝ./ปณ.<input name="post_office" value="${esc(h.post_office)}"></label>
       <label>ฝากส่งครั้งที่ (ของเดือนนี้)<input name="round_no" type="number" min="1" value="${h.round_no}"></label>
-      <label>ยอดรวมยกมาจากครั้งก่อน (บาท)<input name="carried_in" inputmode="decimal" value="${money(h.carried_in)}"></label>
     </div></fieldset>
     ${d.rows.length ? '' : '<p class="warn">ไม่มีซองที่ส่งทาง "ไปรษณีย์ไทย" ของบริษัทนี้ในวันที่เลือก (เช็กวันที่ส่งและช่องส่งทางของซอง) — เพิ่มแถวเองได้</p>'}
-    <div class="tablewrap"><table class="mf-edit"><thead><tr><th>ใส่</th><th>#</th><th>ผู้รับ</th><th>ปลายทาง</th><th>ประเภทบริการ</th><th>เลขที่บริการ (13 หลัก)</th><th class="num">ค่าบริการ</th><th>หมายเหตุ</th></tr></thead>
+    <div class="tablewrap"><table class="mf-edit"><thead><tr><th>ใส่</th><th>#</th><th>ผู้รับ</th><th>ปลายทาง</th><th>ประเภทบริการ</th><th>เลขที่บริการ (13 หลัก)</th><th>หมายเหตุ</th></tr></thead>
       <tbody>${d.rows.map(mfRow).join('')}</tbody></table></div>
     <div class="bar" style="margin-top:8px"><button type="button" class="btn ghost sm" id="mfAdd">+ เพิ่มแถว</button>
       <span class="grow"></span><b id="mfSum"></b></div>
@@ -885,13 +862,11 @@ async function loadDraft() {
   const form = $('#mfForm'), tbody = $('.mf-edit tbody', form);
   const rowsOf = () => $$('.mfrow', form).filter((tr) => $('.mf-on', tr).checked).map((tr) => ({
     parcel_id: Number($('.mf-pid', tr).textContent) || null, recipient: $('.mf-rec', tr).value.trim(), dest: $('.mf-dest', tr).value.trim(),
-    service: $('.mf-svc', tr).value, tracking: $('.mf-trk', tr).value.trim(), postage: $('.mf-pst', tr).value.trim(), note: $('.mf-note', tr).value.trim() }));
+    service: $('.mf-svc', tr).value, tracking: $('.mf-trk', tr).value.trim(), note: $('.mf-note', tr).value.trim() }));
   const refresh = () => {
     let n = 0;
     $$('.mfrow', form).forEach((tr) => { const on = $('.mf-on', tr).checked; tr.classList.toggle('off', !on); $('.mf-n', tr).textContent = on ? ++n : ''; });
-    const rows = rowsOf(), total = sumAmount(rows.map((r) => ({ amount: r.postage })));
-    const missing = rows.filter((r) => numOrNull(r.postage) == null).length;
-    $('#mfSum').innerHTML = `${rows.length} ชิ้น · ค่าฝากส่ง ${money(total || 0)} บาท${missing ? ` <span class="err">(ยังไม่ใส่ค่าบริการ ${missing} รายการ)</span>` : ''}`;
+    $('#mfSum').textContent = `รวมทั้งสิ้น ${rowsOf().length} ชิ้น`;
   };
   tbody.addEventListener('input', refresh);
   tbody.addEventListener('change', refresh);
@@ -910,11 +885,9 @@ async function loadManifests() {
   let list;
   try { list = await api(`/api/manifests?company=${MF.company || ''}`); }
   catch (e) { $('#mfList').innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
-  $('#mfList').innerHTML = list.length ? `<table><tr><th>วันที่ฝากส่ง</th><th>บริษัท</th><th class="num">ครั้งที่</th><th>เล่ม/เลขที่</th><th class="num">ชิ้น</th>
-      <th class="num">ค่าฝากส่ง</th><th class="num">ยอดรวมยกไป</th><th>ผู้บันทึก</th><th></th></tr>
+  $('#mfList').innerHTML = list.length ? `<table><tr><th>วันที่ฝากส่ง</th><th>บริษัท</th><th class="num">ครั้งที่</th><th>เล่ม/เลขที่</th><th class="num">ชิ้น</th><th>ผู้บันทึก</th><th></th></tr>
     ${list.map((m) => `<tr><td class="nowrap">${thDate(m.sent_date)}</td><td>${esc(companyOf(m.company_id).name)}</td><td class="num">${m.round_no}</td>
-      <td>${esc([m.book_no, m.doc_no].filter(Boolean).join(' / ')) || '-'}</td><td class="num">${m.count}</td><td class="num">${money(m.total)}</td>
-      <td class="num">${money(m.carried_in + m.total)}</td><td>${esc(m.created_name)}</td>
+      <td>${esc([m.book_no, m.doc_no].filter(Boolean).join(' / ')) || '-'}</td><td class="num">${m.count}</td><td>${esc(m.created_name)}</td>
       <td class="nowrap"><button class="btn ghost sm" data-mfp="${m.id}">พิมพ์</button>${isAdmin() ? ` <button class="btn danger sm" data-mfd="${m.id}">ลบ</button>` : ''}</td></tr>`).join('')}</table>`
     : '<p class="mute">ยังไม่มีใบนำส่ง</p>';
   $$('[data-mfp]').forEach((b) => (b.onclick = async () => manifestPrintDialog(await api(`/api/manifests/${b.dataset.mfp}`))));
@@ -930,11 +903,7 @@ function manifestHtml(m) {
   const co = companyOf(m.company_id);
   const rows = [...m.rows];
   while (rows.length < 10 || rows.length % 10) rows.push(null);
-  const per = Object.fromEntries(S.postServices.map((x) => [x, { n: 0, amt: 0 }]));
-  for (const r of m.rows) if (per[r.service]) { per[r.service].n++; per[r.service].amt += r.postage || 0; }
-  const amt = (v) => (v ? money(v) : '');
-  const total = m.total, carriedOut = m.carried_in + m.total;
-  const sumRows = [['ลงทะเบียน', 'ลงทะเบียน'], ['รับรอง', 'รับรอง'], ['EMS', 'EMS'], ['รับประกัน', 'รับประกัน'], ['พัสดุ', 'พัสดุ ฯ'], ['พกง.', 'พกง.'], ['ธรรมดา', 'ธรรมดา']];
+  const normal = m.rows.filter((r) => r.service === 'ธรรมดา').length;
   return `<div class="mf-page">
     <div class="mf-top"><span>เล่มที่ ${esc(m.book_no)}</span><span>เลขที่ ${esc(m.doc_no)}</span></div>
     <div class="mf-head">
@@ -945,31 +914,23 @@ function manifestHtml(m) {
         <tr><th>ใบอนุญาตเลขที่</th><td>${esc(m.permit_no)}</td></tr><tr><th>ศฝ./ปณ.</th><td>${esc(m.post_office)}</td></tr>
         <tr><th>ฝากส่งครั้งที่</th><td>${m.round_no} ของเดือนนี้</td></tr></table>
     </div>
-    <table class="mf-list"><colgroup><col style="width:8mm"><col><col style="width:28mm"><col style="width:23mm"><col style="width:44mm"><col style="width:20mm"><col style="width:18mm"></colgroup><thead><tr><th class="c"></th><th>ผู้รับ</th><th>ปลายทาง</th><th>ประเภท<br>บริการ</th><th>เลขที่บริการ (13 หลัก)</th><th>ค่าบริการ</th><th>หมายเหตุ</th></tr></thead>
+    <table class="mf-list"><colgroup><col style="width:8mm"><col><col style="width:28mm"><col style="width:23mm"><col style="width:44mm"><col style="width:20mm"><col style="width:18mm"></colgroup>
+      <thead><tr><th class="c"></th><th>ผู้รับ</th><th>ปลายทาง</th><th>ประเภท<br>บริการ</th><th>เลขที่บริการ (13 หลัก)</th><th>ค่าบริการ</th><th>หมายเหตุ</th></tr></thead>
       <tbody>${rows.map((r, i) => `<tr><td class="c">${i + 1}</td><td>${r ? esc(r.recipient) : ''}</td><td>${r ? esc(r.dest) : ''}</td><td class="c">${r ? esc(r.service) : ''}</td>
-        <td class="mono">${r ? esc(r.tracking) : ''}</td><td class="num">${r ? amt(r.postage) : ''}</td><td>${r ? esc(r.note) : ''}</td></tr>`).join('')}</tbody>
+        <td class="mono">${r ? esc(r.tracking) : ''}</td><td></td><td>${r ? esc(r.note) : ''}</td></tr>`).join('')}</tbody>
       <tfoot><tr><td colspan="4" rowspan="2" class="mf-hint"><u>หมายเหตุ</u> ช่องประเภทบริการให้ระบุบริการที่ฝากส่ง เช่น ลงทะเบียน รับรอง EMS รับประกัน พัสดุ หรือ พกง. เป็นต้น</td>
-        <td class="mf-small">ไปรษณีย์ภัณฑ์ธรรมดารวม Express จำนวน ${per['ธรรมดา'].n || '......'} ชิ้น</td><td class="num">${amt(per['ธรรมดา'].amt)}</td><td></td></tr>
-        <tr><td class="c"><b>รวมทั้งสิ้น</b></td><td class="num"><b>${money(total)}</b></td><td></td></tr></tfoot></table>
-    <div class="mf-bottom">
-      <div class="mf-sumbox"><div class="mf-sumtitle">สรุปยอดฝากส่งครั้งนี้</div>
-        <table class="mf-sum"><thead><tr><th rowspan="2">ประเภท<br>บริการ</th><th colspan="2">ในประเทศ (ยอดรวม)</th><th colspan="2">ต่างประเทศ (ยอดรวม)</th><th rowspan="2">รวมเงิน<br>(1+2)</th></tr>
-          <tr><th>ชิ้น</th><th>บาท</th><th>ชิ้น</th><th>บาท</th></tr></thead>
-          <tbody>${sumRows.map(([k, label]) => `<tr><th>${label}</th><td class="c">${per[k].n || ''}</td><td class="num">${amt(per[k].amt)}</td><td></td><td></td><td class="num">${amt(per[k].amt)}</td></tr>`).join('')}
-            <tr><th>ยอดรวม</th><td class="c">${m.rows.length}</td><td class="num">${money(total)}</td><td></td><td></td><td class="num"><b>${money(total)}</b></td></tr></tbody></table>
-        <table class="mf-carry"><tr><th>ยอดรวมยกมาจากครั้งก่อน</th><td class="num">${money(m.carried_in)}</td><td>บาท</td></tr>
-          <tr><th>ค่าฝากส่งครั้งนี้</th><td class="num">${money(total)}</td><td>บาท</td></tr>
-          <tr><th>ยอดรวมยกไป</th><td class="num"><b>${money(carriedOut)}</b></td><td>บาท</td></tr></table></div>
-      <div class="mf-side"><div>(ตัวอักษร) <b>${bahtText(total)}</b></div>
-        <div class="mf-sign">ได้ตรวจสอบถูกต้องแล้ว<br><br>ลงชื่อ ..............................................<br>ผู้รับผิดชอบในการฝากส่ง</div>
-        <div class="mf-stampwrap"><div class="mf-stamp">ตราประจำวัน</div>
-          <div class="mf-sign">ลงชื่อ ..............................................<br>ได้ตรวจสอบและรับฝากถูกต้องแล้ว</div></div></div>
+        <td class="mf-small">ไปรษณีย์ภัณฑ์ธรรมดารวม Express จำนวน ${normal || '......'} ชิ้น</td><td></td><td></td></tr>
+        <tr><td class="c"><b>รวมทั้งสิ้น</b></td><td colspan="2" class="c"><b>${m.rows.length} ชิ้น</b></td></tr></tfoot></table>
+    <div class="mf-signs">
+      <div class="mf-sign">ได้ตรวจสอบถูกต้องแล้ว<br><br>ลงชื่อ ..............................................<br>ผู้รับผิดชอบในการฝากส่ง</div>
+      <div class="mf-stamp">ตราประจำวัน</div>
+      <div class="mf-sign"><br><br>ลงชื่อ ..............................................<br>ได้ตรวจสอบและรับฝากถูกต้องแล้ว</div>
     </div></div>`;
 }
 
 function manifestPrintDialog(m) {
   const d = dialog(`<h3>ใบนำส่งไปรษณีย์ — ${esc(companyOf(m.company_id).name)} ครั้งที่ ${m.round_no} (${thDate(m.sent_date)})</h3>
-    <p class="mute">กระดาษ A4 · ${m.rows.length} ชิ้น · ค่าฝากส่ง ${money(m.total)} บาท</p>
+    <p class="mute">กระดาษ A4 · ${m.rows.length} ชิ้น</p>
     <div class="env-preview" id="mfPrev"></div>
     <div class="actions"><button type="button" class="btn ghost" data-close>ปิด</button><button type="button" class="btn" id="mfGo">พิมพ์</button></div>`, true);
   const box = $('#mfPrev', d);

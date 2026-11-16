@@ -903,7 +903,8 @@ app.post('/api/manifests', auth, async (req, res) => {
   if (carried === undefined) fail(400, 'ยอดรวมยกมาไม่ถูกต้อง');
   const list = Array.isArray(b.rows) ? b.rows.slice(0, 500) : [];
   const rows = list.map((r, i) => {
-    const postage = parseAmount(r.postage);
+    // ใบนำส่งไม่ระบุราคา (ค่าบริการว่าง) — ถ้าส่งมาจะเก็บไว้ แต่ไม่บังคับ
+    const postage = r.postage === undefined ? null : parseAmount(r.postage);
     if (postage === undefined) fail(400, `แถว ${i + 1}: ค่าบริการ "${r.postage}" ไม่ถูกต้อง`);
     const service = POST_SERVICES.includes(r.service) ? r.service : '';
     return { parcel_id: Number(r.parcel_id) || null, recipient: str(r.recipient, 200), dest: str(r.dest, 100), service,
@@ -921,12 +922,11 @@ app.post('/api/manifests', auth, async (req, res) => {
     if (!old) continue;
     const carrier = r.service ? `ไปรษณีย์ไทย (${r.service})` : old.carrier;
     const before = {}, after = {};
-    if ((old.postage ?? null) !== (r.postage ?? null)) { before.postage = old.postage; after.postage = r.postage; }
     if (old.carrier !== carrier) { before.carrier = old.carrier; after.carrier = carrier; }
     if (!Object.keys(before).length) continue;
     stmts.push({ sql: 'INSERT INTO parcel_edits (parcel_id, edited_by, edited_at, before, after, reason) VALUES (?, ?, ?, ?, ?, ?)',
       args: [old.id, req.user.id, t, JSON.stringify(before), JSON.stringify(after), `ใบนำส่งไปรษณีย์ ครั้งที่ ${round_no}`] },
-    { sql: 'UPDATE parcels SET postage = ?, carrier = ?, updated_by = ?, updated_at = ? WHERE id = ?', args: [r.postage ?? null, carrier, req.user.id, t, old.id] });
+    { sql: 'UPDATE parcels SET carrier = ?, updated_by = ?, updated_at = ? WHERE id = ?', args: [carrier, req.user.id, t, old.id] });
   }
   const tx = await client.transaction('write');
   try {
@@ -960,11 +960,11 @@ app.get('/api/export.xlsx', auth, async (req, res) => {
   const f = listFilter(req.query);
   const rows = await withReceipts(await db.all(`SELECT ${PARCEL_COLS} ${PARCEL_FROM} WHERE ${f.sql} ${ORDER}`, ...f.args));
   const coName = Object.fromEntries((await db.all('SELECT id, name FROM companies')).map((c) => [c.id, c.name]));
-  const aoa = [['ซองที่', 'บริษัทผู้ส่ง', 'เลขที่ใบเสร็จ', 'ชื่อลูกค้า', 'ยอดเงิน', 'รายละเอียดสินค้า', 'ส่งถึง', 'วันที่ส่ง', 'ส่งไปที่', 'ส่งทาง', 'เลขพัสดุ', 'ค่าบริการ', 'สถานะ', 'หมายเหตุ', 'ผู้บันทึก']];
+  const aoa = [['ซองที่', 'บริษัทผู้ส่ง', 'เลขที่ใบเสร็จ', 'ชื่อลูกค้า', 'ยอดเงิน', 'รายละเอียดสินค้า', 'ส่งถึง', 'วันที่ส่ง', 'ส่งไปที่', 'ส่งทาง', 'เลขพัสดุ', 'สถานะ', 'หมายเหตุ', 'ผู้บันทึก']];
   for (const p of rows) for (const r of p.receipts)
-    aoa.push([p.id, coName[p.company_id] || '', r.receipt_no, r.customer || p.customer, r.amount == null ? '' : r.amount / 100, r.detail, p.customer, thDate(p.sent_date), p.destination, p.carrier, p.tracking_no, p.postage == null ? '' : p.postage / 100, STATUS_TH[p.status], p.note, p.created_name]);
+    aoa.push([p.id, coName[p.company_id] || '', r.receipt_no, r.customer || p.customer, r.amount == null ? '' : r.amount / 100, r.detail, p.customer, thDate(p.sent_date), p.destination, p.carrier, p.tracking_no, STATUS_TH[p.status], p.note, p.created_name]);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [7, 28, 16, 32, 14, 36, 32, 12, 50, 22, 18, 12, 16, 30, 18].map((wch) => ({ wch }));
+  ws['!cols'] = [7, 28, 16, 32, 14, 36, 32, 12, 50, 22, 18, 16, 30, 18].map((wch) => ({ wch }));
   for (let i = 1; i < aoa.length; i++) { const c = ws[XLSX.utils.encode_cell({ r: i, c: 4 })]; if (c && c.t === 'n') c.z = '#,##0.00'; }
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'การส่งใบเสร็จ');

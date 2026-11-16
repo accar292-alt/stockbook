@@ -266,3 +266,6 @@ table.mf-edit .mf-n { color: var(--mute); text-align: right; }
 .mf-list tbody td:nth-child(5) { white-space: nowrap; letter-spacing: 0; }
 .mf-meta { border-collapse: separate; border-spacing: 0 3px; }
 .mf-meta th { padding-right: 10px; }
+.mf-signs { display: flex; justify-content: space-between; align-items: center; gap: 6mm; margin-top: 8mm; break-inside: avoid; }
+.mf-signs .mf-sign { flex: 1; }
+.mf-signs .mf-stamp { width: 30mm; height: 24mm; white-space: nowrap; font-size: 12pt; }
