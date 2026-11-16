@@ -269,3 +269,13 @@ table.mf-edit .mf-n { color: var(--mute); text-align: right; }
 .mf-signs { display: flex; justify-content: space-between; align-items: center; gap: 6mm; margin-top: 8mm; break-inside: avoid; }
 .mf-signs .mf-sign { flex: 1; }
 .mf-signs .mf-stamp { width: 30mm; height: 24mm; white-space: nowrap; font-size: 12pt; }
+.mf-head { grid-template-columns: 1fr auto auto; align-items: start; gap: 5mm; }
+.mf-permit .env-permit { position: static; font-size: 12pt; color: #000; }
+.mf-round { display: flex; gap: 6px; }
+.mf-round span { display: inline-block; min-width: 18mm; }
+.mf-meta td.mf-round { border-bottom: 0; }
+.mf-meta td.mf-round span { border-bottom: 1px dotted #10204a; }
+.mf-head { display: flex; justify-content: flex-end; align-items: flex-start; gap: 8mm; margin: 2mm 0 2mm; }
+.mf-desc { margin-bottom: 2mm; }
+.mf-permit { flex: none; }
+.mf-permit .env-permit { white-space: nowrap; }

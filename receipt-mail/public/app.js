@@ -850,7 +850,7 @@ async function loadDraft() {
       <label>หน่วยงาน<input name="dept" value="${esc(h.dept)}"></label>
       <label>ใบอนุญาตเลขที่<input name="permit_no" value="${esc(h.permit_no)}"></label>
       <label>ศฝ./ปณ.<input name="post_office" value="${esc(h.post_office)}"></label>
-      <label>ฝากส่งครั้งที่ (ของเดือนนี้)<input name="round_no" type="number" min="1" value="${h.round_no}"></label>
+      <input type="hidden" name="round_no" value="${h.round_no}">
     </div></fieldset>
     ${d.rows.length ? '' : '<p class="warn">ไม่มีซองที่ส่งทาง "ไปรษณีย์ไทย" ของบริษัทนี้ในวันที่เลือก (เช็กวันที่ส่งและช่องส่งทางของซอง) — เพิ่มแถวเองได้</p>'}
     <div class="tablewrap"><table class="mf-edit"><thead><tr><th>ใส่</th><th>#</th><th>ผู้รับ</th><th>ปลายทาง</th><th>ประเภทบริการ</th><th>เลขที่บริการ (13 หลัก)</th><th>หมายเหตุ</th></tr></thead>
@@ -906,14 +906,15 @@ function manifestHtml(m) {
   const normal = m.rows.filter((r) => r.service === 'ธรรมดา').length;
   return `<div class="mf-page">
     <div class="mf-top"><span>เล่มที่ ${esc(m.book_no)}</span><span>เลขที่ ${esc(m.doc_no)}</span></div>
+    <div class="mf-co">${esc(co.name)}</div>
+    <div class="mf-title">ใบนำส่งสิ่งของทางไปรษณีย์โดยชำระค่าบริการเป็นเงินสินเชื่อ</div>
     <div class="mf-head">
-      <div><div class="mf-co">${esc(co.name)}</div>
-        <div class="mf-title">ใบนำส่งสิ่งของทางไปรษณีย์โดยชำระค่าบริการเป็นเงินสินเชื่อ</div>
-        <div>ได้ฝากส่งสิ่งของทางไปรษณีย์โดยชำระค่าบริการเป็นเงินเชื่อดังรายการต่อไปนี้</div></div>
+      <div class="mf-permit">${permitHtml({ permit_no: m.permit_no || co.permit_no, permit_office: m.post_office || co.permit_office })}</div>
       <table class="mf-meta"><tr><th>วัน/เดือน/ปี</th><td>${longThDate(m.sent_date)}</td></tr><tr><th>หน่วยงาน</th><td>${esc(m.dept)}</td></tr>
         <tr><th>ใบอนุญาตเลขที่</th><td>${esc(m.permit_no)}</td></tr><tr><th>ศฝ./ปณ.</th><td>${esc(m.post_office)}</td></tr>
-        <tr><th>ฝากส่งครั้งที่</th><td>${m.round_no} ของเดือนนี้</td></tr></table>
+        <tr><th>ฝากส่งครั้งที่</th><td class="mf-round"><span></span>ของเดือนนี้</td></tr></table>
     </div>
+    <div class="mf-desc">ได้ฝากส่งสิ่งของทางไปรษณีย์โดยชำระค่าบริการเป็นเงินเชื่อดังรายการต่อไปนี้</div>
     <table class="mf-list"><colgroup><col style="width:8mm"><col><col style="width:28mm"><col style="width:23mm"><col style="width:44mm"><col style="width:20mm"><col style="width:18mm"></colgroup>
       <thead><tr><th class="c"></th><th>ผู้รับ</th><th>ปลายทาง</th><th>ประเภท<br>บริการ</th><th>เลขที่บริการ (13 หลัก)</th><th>ค่าบริการ</th><th>หมายเหตุ</th></tr></thead>
       <tbody>${rows.map((r, i) => `<tr><td class="c">${i + 1}</td><td>${r ? esc(r.recipient) : ''}</td><td>${r ? esc(r.dest) : ''}</td><td class="c">${r ? esc(r.service) : ''}</td>
