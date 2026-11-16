@@ -300,3 +300,6 @@ table.mf-edit .mf-n { color: var(--mute); text-align: right; }
 .mf-top .mf-fill { display: inline-block; min-width: 32mm; border-bottom: 1px dotted #10204a; text-align: center; }
 .mf-top .mf-docno { margin-right: 12mm; }
 .mf-list tbody td:nth-child(3) { text-align: center; letter-spacing: 1px; }
+/* ตารางรายการใบนำส่ง: ตัวหนังสือกึ่งกลางแนวตั้ง และใหญ่ขึ้น 1 ระดับ (14pt) */
+.mf-page .mf-list th, .mf-page .mf-list td { vertical-align: middle; font-size: 14pt; }
+.mf-page .mf-list .mf-hint, .mf-page .mf-list .mf-small { font-size: 13pt !important; }
