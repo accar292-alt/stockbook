@@ -924,10 +924,18 @@ function manifestHtml(m) {
       <tfoot><tr><td colspan="4" rowspan="2" class="mf-hint"><u>หมายเหตุ</u> ช่องประเภทบริการให้ระบุบริการที่ฝากส่ง เช่น ลงทะเบียน รับรอง EMS รับประกัน พัสดุ หรือ พกง. เป็นต้น</td>
         <td class="mf-small">ไปรษณีย์ภัณฑ์ธรรมดารวม Express จำนวน ${normal || '......'} ชิ้น</td><td></td><td></td></tr>
         <tr><td class="c"><b>รวมทั้งสิ้น</b></td><td colspan="2" class="c"><b>${m.rows.length} ชิ้น</b></td></tr></tfoot></table>
-    <div class="mf-signs">
-      <div class="mf-sign">ได้ตรวจสอบถูกต้องแล้ว<br><br>ลงชื่อ ..............................................<br>ผู้รับผิดชอบในการฝากส่ง</div>
-      <div class="mf-stamp">ตราประจำวัน</div>
-      <div class="mf-sign"><br><br>ลงชื่อ ..............................................<br>ได้ตรวจสอบและรับฝากถูกต้องแล้ว</div>
+    <div class="mf-bottom">
+      <div class="mf-sumbox"><div class="mf-sumtitle">สรุปยอดฝากส่งครั้งนี้</div>
+        <table class="mf-sum"><thead><tr><th rowspan="2">ประเภท<br>บริการ</th><th colspan="2">ในประเทศ (ยอดรวม)</th><th colspan="2">ต่างประเทศ (ยอดรวม)</th><th rowspan="2">รวมเงิน<br>(1+2)</th></tr>
+          <tr><th>ชิ้น</th><th>บาท</th><th>ชิ้น</th><th>บาท</th></tr></thead>
+          <tbody>${['ลงทะเบียน', 'รับรอง', 'EMS', 'รับประกัน', 'พัสดุ ฯ', 'พกง.', 'ธรรมดา', 'ยอดรวม'].map((label) => `<tr><th>${label}</th><td></td><td></td><td></td><td></td><td></td></tr>`).join('')}</tbody></table>
+        <table class="mf-carry"><tr><th>ยอดรวมยกมาจากครั้งก่อน</th><td class="mf-dots">..................................</td><td>บาท</td></tr>
+          <tr><th>ค่าฝากส่งครั้งนี้</th><td class="mf-dots">..................................</td><td>บาท</td></tr>
+          <tr><th>ยอดรวมยกไป</th><td class="mf-dots">..................................</td><td>บาท</td></tr></table></div>
+      <div class="mf-side"><div>(ตัวอักษร) <span class="mf-dots mf-words"></span></div>
+        <div class="mf-sign">ได้ตรวจสอบถูกต้องแล้ว<br><br>ลงชื่อ ..............................................<br>ผู้รับผิดชอบในการฝากส่ง</div>
+        <div class="mf-stampwrap"><div class="mf-stamp">ตราประจำวัน</div>
+          <div class="mf-sign">ลงชื่อ ..............................................<br>ได้ตรวจสอบและรับฝากถูกต้องแล้ว</div></div></div>
     </div></div>`;
 }
 
