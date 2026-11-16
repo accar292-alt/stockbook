@@ -861,9 +861,9 @@ app.get('/api/manifest-draft', auth, async (req, res) => {
   const parcels = await db.all(`SELECT id, customer, destination, carrier, tracking_no, postage, note FROM parcels
     WHERE deleted = 0 AND company_id = ? AND sent_date = ? AND carrier LIKE 'ไปรษณีย์ไทย%' ORDER BY id`, company, date);
   // ซองที่อยู่ในใบนำส่งที่บันทึกไปแล้ว
-  const saved = await db.all('SELECT id, round_no, rows FROM manifests WHERE company_id = ?', company);
+  const saved = await db.all('SELECT id, sent_date, rows FROM manifests WHERE company_id = ?', company);
   const inManifest = new Map();
-  for (const m of saved) for (const r of JSON.parse(m.rows)) if (r.parcel_id) inManifest.set(r.parcel_id, m.round_no);
+  for (const m of saved) for (const r of JSON.parse(m.rows)) if (r.parcel_id) inManifest.set(r.parcel_id, m.sent_date);
   const month = date.slice(0, 7);
   const prev = await db.get(`SELECT * FROM manifests WHERE company_id = ? AND substr(sent_date, 1, 7) = ? AND sent_date <= ?
     ORDER BY sent_date DESC, id DESC LIMIT 1`, company, month, date);
@@ -930,7 +930,7 @@ app.post('/api/manifests', auth, async (req, res) => {
     if (old.carrier !== carrier) { before.carrier = old.carrier; after.carrier = carrier; }
     if (!Object.keys(before).length) continue;
     stmts.push({ sql: 'INSERT INTO parcel_edits (parcel_id, edited_by, edited_at, before, after, reason) VALUES (?, ?, ?, ?, ?, ?)',
-      args: [old.id, req.user.id, t, JSON.stringify(before), JSON.stringify(after), `ใบนำส่งไปรษณีย์ ครั้งที่ ${round_no}`] },
+      args: [old.id, req.user.id, t, JSON.stringify(before), JSON.stringify(after), `ใบนำส่งไปรษณีย์ วันที่ ${thDate(b.sent_date)}`] },
     { sql: 'UPDATE parcels SET carrier = ?, updated_by = ?, updated_at = ? WHERE id = ?', args: [carrier, req.user.id, t, old.id] });
   }
   const tx = await client.transaction('write');

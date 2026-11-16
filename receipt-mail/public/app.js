@@ -829,7 +829,7 @@ async function manifestPage() {
 const mfRow = (r = {}) => `<tr class="mfrow">
   <td class="c"><input type="checkbox" class="mf-on" ${r.in_round ? '' : 'checked'} aria-label="ใส่ในใบนำส่ง"></td>
   <td class="mf-n"></td>
-  <td><input class="mf-rec" value="${esc(r.recipient)}" aria-label="ผู้รับ">${r.in_round ? `<div class="mute">อยู่ในใบนำส่งครั้งที่ ${r.in_round} แล้ว</div>` : ''}</td>
+  <td><input class="mf-rec" value="${esc(r.recipient)}" aria-label="ผู้รับ">${r.in_round ? `<div class="mute">อยู่ในใบนำส่งวันที่ ${thDate(r.in_round)} แล้ว</div>` : ''}</td>
   <td><input class="mf-dest" value="${esc(r.dest)}" inputmode="numeric" maxlength="10" placeholder="รหัสไปรษณีย์" aria-label="ปลายทาง (รหัสไปรษณีย์)"></td>
   <td><select class="mf-svc" aria-label="ประเภทบริการ"><option value="">-</option>${S.postServices.map((x) => `<option ${x === r.service ? 'selected' : ''}>${x}</option>`).join('')}</select></td>
   <td><input class="mf-trk" value="${esc(r.tracking)}" aria-label="เลขที่บริการ"></td>
@@ -885,8 +885,8 @@ async function loadManifests() {
   let list;
   try { list = await api(`/api/manifests?company=${MF.company || ''}`); }
   catch (e) { $('#mfList').innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
-  $('#mfList').innerHTML = list.length ? `<table><tr><th>วันที่ฝากส่ง</th><th>บริษัท</th><th class="num">ครั้งที่</th><th>เล่ม/เลขที่</th><th class="num">ชิ้น</th><th>ผู้บันทึก</th><th></th></tr>
-    ${list.map((m) => `<tr><td class="nowrap">${thDate(m.sent_date)}</td><td>${esc(companyOf(m.company_id).name)}</td><td class="num">${m.round_no}</td>
+  $('#mfList').innerHTML = list.length ? `<table><tr><th>วันที่ฝากส่ง</th><th>บริษัท</th><th>เล่ม/เลขที่</th><th class="num">ชิ้น</th><th>ผู้บันทึก</th><th></th></tr>
+    ${list.map((m) => `<tr><td class="nowrap">${thDate(m.sent_date)}</td><td>${esc(companyOf(m.company_id).name)}</td>
       <td>${esc([m.book_no, m.doc_no].filter(Boolean).join(' / ')) || '-'}</td><td class="num">${m.count}</td><td>${esc(m.created_name)}</td>
       <td class="nowrap"><button class="btn ghost sm" data-mfp="${m.id}">พิมพ์</button>${isAdmin() ? ` <button class="btn danger sm" data-mfd="${m.id}">ลบ</button>` : ''}</td></tr>`).join('')}</table>`
     : '<p class="mute">ยังไม่มีใบนำส่ง</p>';
@@ -940,7 +940,7 @@ function manifestHtml(m) {
 }
 
 function manifestPrintDialog(m) {
-  const d = dialog(`<h3>ใบนำส่งไปรษณีย์ — ${esc(companyOf(m.company_id).name)} ครั้งที่ ${m.round_no} (${thDate(m.sent_date)})</h3>
+  const d = dialog(`<h3>ใบนำส่งไปรษณีย์ — ${esc(companyOf(m.company_id).name)} (${thDate(m.sent_date)})</h3>
     <p class="mute">กระดาษ A4 · ${m.rows.length} ชิ้น</p>
     <div class="env-preview" id="mfPrev"></div>
     <div class="actions"><button type="button" class="btn ghost" data-close>ปิด</button><button type="button" class="btn" id="mfGo">พิมพ์</button></div>`, true);
