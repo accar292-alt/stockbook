@@ -888,7 +888,15 @@ app.get('/api/manifests', auth, async (req, res) => {
 app.get('/api/manifests/:id', auth, async (req, res) => {
   const m = await db.get('SELECT m.*, u.name AS created_name FROM manifests m JOIN users u ON u.id = m.created_by WHERE m.id = ?', Number(req.params.id));
   if (!m) fail(404, 'ไม่พบใบนำส่ง');
-  res.json(manifestOut(m));
+  const out = manifestOut(m);
+  // ใบที่บันทึกก่อนเปลี่ยนปลายทางเป็นรหัสไปรษณีย์ (ปลายทางเป็นชื่อจังหวัด) → ใช้รหัสไปรษณีย์จากที่อยู่ของซอง
+  for (const r of out.rows) {
+    if (!r.parcel_id || /^\d{5}$/.test(r.dest || '')) continue;
+    const p = await db.get('SELECT destination FROM parcels WHERE id = ?', r.parcel_id);
+    const zip = p && destOf(p.destination);
+    if (zip) r.dest = zip;
+  }
+  res.json(out);
 });
 
 // บันทึกใบนำส่ง และอัปเดตค่าบริการ/ประเภทบริการกลับไปที่ซอง (เก็บประวัติการแก้ไขของซองด้วย)
