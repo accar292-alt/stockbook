@@ -844,13 +844,10 @@ app.post('/api/customers/import', auth, async (req, res) => {
 });
 
 // ---------- ใบนำส่งไปรษณีย์ (ชำระค่าบริการเป็นเงินสินเชื่อ) ----------
-// ปลายทาง: ใช้จังหวัดจากที่อยู่ (จ./จังหวัด หรือ กรุงเทพฯ) ถ้าหาไม่ได้ใช้รหัสไปรษณีย์
 function destOf(address) {
-  const a = String(address || '');
-  if (/กรุงเทพ|กทม/.test(a)) return 'กรุงเทพฯ';
-  const m = /(?:จ\.|จังหวัด)\s*([^\s\d,]+)/.exec(a);
-  if (m) return m[1];
-  return (/(\d{5})\s*$/.exec(a.trim()) || [])[1] || '';
+  // ปลายทาง = รหัสไปรษณีย์ 5 หลักของที่อยู่ผู้รับ (ตัวท้ายสุดที่เจอ)
+  const all = String(address || '').match(/(?<!\d)\d{5}(?!\d)/g);
+  return all ? all[all.length - 1] : '';
 }
 const manifestOut = (m) => ({ ...m, carried_in: m.carried_in / 100, total: m.total / 100,
   rows: JSON.parse(m.rows).map((r) => ({ ...r, postage: baht(r.postage) })) });

@@ -296,3 +296,7 @@ table.mf-edit .mf-n { color: var(--mute); text-align: right; }
 .mf-words { display: inline-block; width: 60mm; border-bottom: 1px dotted #10204a; height: 1em; vertical-align: bottom; }
 .mf-stampwrap .mf-stamp { width: 26mm; height: 24mm; white-space: nowrap; font-size: 12pt; }
 .mf-carry td.mf-dots { border-bottom: 1px solid #10204a; text-align: right; color: #10204a; }
+/* เล่มที่/เลขที่ มุมบน: เว้นที่ไว้เขียนตัวเลข และขยับเลขที่เข้ามาจากขอบขวา */
+.mf-top .mf-fill { display: inline-block; min-width: 32mm; border-bottom: 1px dotted #10204a; text-align: center; }
+.mf-top .mf-docno { margin-right: 12mm; }
+.mf-list tbody td:nth-child(3) { text-align: center; letter-spacing: 1px; }

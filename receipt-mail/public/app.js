@@ -830,7 +830,7 @@ const mfRow = (r = {}) => `<tr class="mfrow">
   <td class="c"><input type="checkbox" class="mf-on" ${r.in_round ? '' : 'checked'} aria-label="ใส่ในใบนำส่ง"></td>
   <td class="mf-n"></td>
   <td><input class="mf-rec" value="${esc(r.recipient)}" aria-label="ผู้รับ">${r.in_round ? `<div class="mute">อยู่ในใบนำส่งครั้งที่ ${r.in_round} แล้ว</div>` : ''}</td>
-  <td><input class="mf-dest" value="${esc(r.dest)}" aria-label="ปลายทาง"></td>
+  <td><input class="mf-dest" value="${esc(r.dest)}" inputmode="numeric" maxlength="10" placeholder="รหัสไปรษณีย์" aria-label="ปลายทาง (รหัสไปรษณีย์)"></td>
   <td><select class="mf-svc" aria-label="ประเภทบริการ"><option value="">-</option>${S.postServices.map((x) => `<option ${x === r.service ? 'selected' : ''}>${x}</option>`).join('')}</select></td>
   <td><input class="mf-trk" value="${esc(r.tracking)}" aria-label="เลขที่บริการ"></td>
   <td><input class="mf-note" value="${esc(r.note)}" aria-label="หมายเหตุ"></td>
@@ -853,7 +853,7 @@ async function loadDraft() {
       <input type="hidden" name="round_no" value="${h.round_no}">
     </div></fieldset>
     ${d.rows.length ? '' : '<p class="warn">ไม่มีซองที่ส่งทาง "ไปรษณีย์ไทย" ของบริษัทนี้ในวันที่เลือก (เช็กวันที่ส่งและช่องส่งทางของซอง) — เพิ่มแถวเองได้</p>'}
-    <div class="tablewrap"><table class="mf-edit"><thead><tr><th>ใส่</th><th>#</th><th>ผู้รับ</th><th>ปลายทาง</th><th>ประเภทบริการ</th><th>เลขที่บริการ (13 หลัก)</th><th>หมายเหตุ</th></tr></thead>
+    <div class="tablewrap"><table class="mf-edit"><thead><tr><th>ใส่</th><th>#</th><th>ผู้รับ</th><th>ปลายทาง (รหัสไปรษณีย์)</th><th>ประเภทบริการ</th><th>เลขที่บริการ (13 หลัก)</th><th>หมายเหตุ</th></tr></thead>
       <tbody>${d.rows.map(mfRow).join('')}</tbody></table></div>
     <div class="bar" style="margin-top:8px"><button type="button" class="btn ghost sm" id="mfAdd">+ เพิ่มแถว</button>
       <span class="grow"></span><b id="mfSum"></b></div>
@@ -905,7 +905,7 @@ function manifestHtml(m) {
   while (rows.length < 10 || rows.length % 10) rows.push(null);
   const normal = m.rows.filter((r) => r.service === 'ธรรมดา').length;
   return `<div class="mf-page">
-    <div class="mf-top"><span>เล่มที่ ${esc(m.book_no)}</span><span>เลขที่ ${esc(m.doc_no)}</span></div>
+    <div class="mf-top"><span>เล่มที่ <span class="mf-fill">${esc(m.book_no)}</span></span><span class="mf-docno">เลขที่ <span class="mf-fill">${esc(m.doc_no)}</span></span></div>
     <div class="mf-head">
       <div class="mf-left">
         <div class="mf-row1"><div class="mf-co">${esc(co.name)}</div>
