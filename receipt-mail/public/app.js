@@ -909,7 +909,6 @@ function manifestHtml(m) {
   const co = companyOf(m.company_id);
   const rows = [...m.rows];
   while (rows.length < 10 || rows.length % 10) rows.push(null);
-  const normal = m.rows.filter((r) => r.service === 'ธรรมดา').length;
   return `<div class="mf-page">
     <div class="mf-top"><span>เล่มที่ <span class="mf-fill">${esc(m.book_no)}</span></span><span class="mf-docno">เลขที่ <span class="mf-fill">${esc(m.doc_no)}</span></span></div>
     <div class="mf-head">
@@ -928,8 +927,8 @@ function manifestHtml(m) {
       <tbody>${rows.map((r, i) => `<tr><td class="c">${i + 1}</td><td>${r ? esc(r.recipient) : ''}</td><td>${r ? esc(r.dest) : ''}</td><td class="c">${r ? esc(r.service) : ''}</td>
         <td class="mono">${r ? esc(r.tracking) : ''}</td><td></td><td>${r ? esc(r.note) : ''}</td></tr>`).join('')}</tbody>
       <tfoot><tr><td colspan="4" rowspan="2" class="mf-hint"><u>หมายเหตุ</u> ช่องประเภทบริการให้ระบุบริการที่ฝากส่ง เช่น ลงทะเบียน รับรอง EMS รับประกัน พัสดุ หรือ พกง. เป็นต้น</td>
-        <td class="mf-small">ไปรษณีย์ภัณฑ์ธรรมดารวม Express จำนวน ${normal || '......'} ชิ้น</td><td></td><td></td></tr>
-        <tr><td class="c"><b>รวมทั้งสิ้น</b></td><td colspan="2" class="c"><b>${m.rows.length} ชิ้น</b></td></tr></tfoot></table>
+        <td class="mf-small">ไปรษณีย์ภัณฑ์ธรรมดารวม Express จำนวน <b>${m.rows.length}</b> ชิ้น</td><td></td><td></td></tr>
+        <tr><td class="c"><b>รวมทั้งสิ้น</b></td><td></td><td></td></tr></tfoot></table>
     <div class="mf-bottom">
       <div class="mf-sumbox"><div class="mf-sumtitle">สรุปยอดฝากส่งครั้งนี้</div>
         <table class="mf-sum"><thead><tr><th rowspan="2">ประเภท<br>บริการ</th><th colspan="2">ในประเทศ (ยอดรวม)</th><th colspan="2">ต่างประเทศ (ยอดรวม)</th><th rowspan="2">รวมเงิน<br>(1+2)</th></tr>
