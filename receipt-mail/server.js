@@ -122,6 +122,10 @@ const ensureReady = () => (ready ??= (async () => {
     if (!pcols.includes('company_id')) await db.run('ALTER TABLE parcels ADD COLUMN company_id INTEGER REFERENCES companies(id)');
     // ค่าบริการไปรษณีย์ของซอง (สตางค์, NULL = ยังไม่ทราบ)
     if (!pcols.includes('postage')) await db.run('ALTER TABLE parcels ADD COLUMN postage INTEGER');
+    // ชื่อลูกค้าบรรทัดที่ 2 (เช่น หน่วยงาน) — ซองเก็บสำเนาไว้ตอนส่ง, สมุดที่อยู่เก็บไว้เติมให้
+    if (!pcols.includes('customer2')) await db.run(`ALTER TABLE parcels ADD COLUMN customer2 TEXT NOT NULL DEFAULT ''`);
+    const cucols = (await db.all(`SELECT name FROM pragma_table_info('customers')`)).map((c) => c.name);
+    if (!cucols.includes('name2')) await db.run(`ALTER TABLE customers ADD COLUMN name2 TEXT NOT NULL DEFAULT ''`);
     // ใบอนุญาตชำระค่าฝากส่งเป็นรายเดือน (แต่ละบริษัทเลขไม่เหมือนกัน) พิมพ์เป็นกรอบมุมขวาบนของหน้าซอง
     const ccols = (await db.all(`SELECT name FROM pragma_table_info('companies')`)).map((c) => c.name);
     if (!ccols.includes('permit_no')) await db.run(`ALTER TABLE companies ADD COLUMN permit_no TEXT NOT NULL DEFAULT ''`);
@@ -181,13 +185,14 @@ function parseAmount(v) {
   return Math.round(n * 100);
 }
 const baht = (satang) => (satang == null ? null : satang / 100);
-const PARCEL_FIELDS = ['company_id', 'customer', 'destination', 'sent_date', 'carrier', 'tracking_no', 'postage', 'status', 'note'];
+const PARCEL_FIELDS = ['company_id', 'customer', 'customer2', 'destination', 'sent_date', 'carrier', 'tracking_no', 'postage', 'status', 'note'];
 
 // ตรวจข้อมูลซอง + รายการใบเสร็จในซอง
 function parcelInput(body) {
   const p = {
     company_id: Number(body.company_id) || 0,
     customer: str(body.customer, 200),
+    customer2: str(body.customer2, 200),
     destination: str(body.destination, 500),
     sent_date: str(body.sent_date, 10),
     carrier: str(body.carrier, 60),
@@ -391,7 +396,7 @@ app.put('/api/settings', admin, async (req, res) => {
 });
 
 // ---------- parcels ----------
-const PARCEL_COLS = `p.id, p.company_id, p.customer, p.destination, p.sent_date, p.carrier, p.tracking_no, p.postage, p.status, p.note,
+const PARCEL_COLS = `p.id, p.company_id, p.customer, p.customer2, p.destination, p.sent_date, p.carrier, p.tracking_no, p.postage, p.status, p.note,
   p.created_at, p.updated_at, cu.name AS created_name, uu.name AS updated_name,
   (SELECT COUNT(*) FROM parcel_edits e WHERE e.parcel_id = p.id) AS edit_count`;
 const PARCEL_FROM = `FROM parcels p JOIN users cu ON cu.id = p.created_by LEFT JOIN users uu ON uu.id = p.updated_by`;
@@ -402,7 +407,7 @@ function listFilter(q) {
   const text = str(q.q, 100);
   if (text) {
     const like = `%${text.replace(/[%_\\]/g, '\\$&')}%`;
-    const cols = ['p.customer', 'p.tracking_no', 'p.destination', 'p.note'];
+    const cols = ['p.customer', 'p.customer2', 'p.tracking_no', 'p.destination', 'p.note'];
     where.push(`(${cols.map((c) => `${c} LIKE ? ESCAPE '\\'`).join(' OR ')}
       OR EXISTS (SELECT 1 FROM parcel_receipts r WHERE r.parcel_id = p.id AND (r.receipt_no LIKE ? ESCAPE '\\' OR r.customer LIKE ? ESCAPE '\\' OR r.detail LIKE ? ESCAPE '\\')))`);
     for (let i = 0; i <= cols.length + 2; i++) args.push(like);
@@ -460,26 +465,26 @@ app.post('/api/check', auth, async (req, res) => {
 
 // ---------- สมุดที่อยู่ลูกค้า ----------
 function customerInput(b) {
-  const c = { name: str(b.name, 200), address: str(b.address, 500), phone: str(b.phone, 100), note: str(b.note, 300) };
+  const c = { name: str(b.name, 200), name2: str(b.name2, 200), address: str(b.address, 500), phone: str(b.phone, 100), note: str(b.note, 300) };
   if (!c.name) fail(400, 'กรอกชื่อลูกค้า');
   return c;
 }
 app.get('/api/customers', auth, async (req, res) => {
-  res.json(await db.all(`SELECT c.id, c.name, c.address, c.phone, c.note, c.updated_at, u.name AS updated_name
+  res.json(await db.all(`SELECT c.id, c.name, c.name2, c.address, c.phone, c.note, c.updated_at, u.name AS updated_name
     FROM customers c LEFT JOIN users u ON u.id = c.updated_by ORDER BY c.name`));
 });
 app.post('/api/customers', auth, async (req, res) => {
   const c = customerInput(req.body);
   if (await db.get('SELECT 1 FROM customers WHERE name = ?', c.name)) fail(400, `มีลูกค้าชื่อ "${c.name}" ในสมุดแล้ว`);
-  const r = await db.run('INSERT INTO customers (name, address, phone, note, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-    c.name, c.address, c.phone, c.note, req.user.id, now());
+  const r = await db.run('INSERT INTO customers (name, name2, address, phone, note, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    c.name, c.name2, c.address, c.phone, c.note, req.user.id, now());
   res.json({ ok: true, id: r.lastInsertRowid });
 });
 app.put('/api/customers/:id', auth, async (req, res) => {
   const id = Number(req.params.id), c = customerInput(req.body);
   if (await db.get('SELECT 1 FROM customers WHERE name = ? AND id <> ?', c.name, id)) fail(400, `มีลูกค้าชื่อ "${c.name}" ในสมุดแล้ว`);
-  const r = await db.run('UPDATE customers SET name = ?, address = ?, phone = ?, note = ?, updated_by = ?, updated_at = ? WHERE id = ?',
-    c.name, c.address, c.phone, c.note, req.user.id, now(), id);
+  const r = await db.run('UPDATE customers SET name = ?, name2 = ?, address = ?, phone = ?, note = ?, updated_by = ?, updated_at = ? WHERE id = ?',
+    c.name, c.name2, c.address, c.phone, c.note, req.user.id, now(), id);
   if (!r.changes) fail(404, 'ไม่พบลูกค้า');
   res.json({ ok: true });
 });
@@ -491,20 +496,25 @@ app.delete('/api/customers/:id', admin, async (req, res) => {
 });
 // ตอนบันทึกซอง: ลูกค้าใหม่ → เพิ่มลงสมุด; ลูกค้าเดิม → อัปเดตที่อยู่เมื่อผู้ใช้เลือก "อัปเดตที่อยู่ในสมุด"
 async function rememberCustomer(p, update, userId) {
-  const ex = await db.get('SELECT id, address FROM customers WHERE name = ?', p.customer);
+  const ex = await db.get('SELECT id, address, name2 FROM customers WHERE name = ?', p.customer);
   if (!ex) {
-    await db.run('INSERT OR IGNORE INTO customers (name, address, updated_by, updated_at) VALUES (?, ?, ?, ?)',
-      p.customer, p.destination, userId, now());
-  } else if (update && p.destination && p.destination !== ex.address) {
-    await db.run('UPDATE customers SET address = ?, updated_by = ?, updated_at = ? WHERE id = ?', p.destination, userId, now(), ex.id);
+    await db.run('INSERT OR IGNORE INTO customers (name, name2, address, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)',
+      p.customer, p.customer2 || '', p.destination, userId, now());
+    return;
   }
+  const set = {};
+  if (update && p.destination && p.destination !== ex.address) set.address = p.destination;
+  if (p.customer2 && p.customer2 !== ex.name2 && (update || !ex.name2)) set.name2 = p.customer2;
+  const keys = Object.keys(set);
+  if (keys.length) await db.run(`UPDATE customers SET ${keys.map((k) => `${k} = ?`).join(', ')}, updated_by = ?, updated_at = ? WHERE id = ?`,
+    ...keys.map((k) => set[k]), userId, now(), ex.id);
 }
 
 const insertReceipts = (id, list) => list.map((r) => ({ sql: 'INSERT INTO parcel_receipts (parcel_id, receipt_no, bill_date, customer, amount, detail) VALUES (?, ?, ?, ?, ?, ?)',
   args: [id, r.receipt_no, r.bill_date, r.customer || '', r.amount ?? null, r.detail || ''] }));
-const INSERT_PARCEL = `INSERT INTO parcels (company_id, customer, destination, sent_date, carrier, tracking_no, postage, status, note, created_by, created_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-const parcelArgs = (p) => [p.company_id, p.customer, p.destination, p.sent_date, p.carrier, p.tracking_no, p.postage ?? null, p.status, p.note];
+const INSERT_PARCEL = `INSERT INTO parcels (company_id, customer, customer2, destination, sent_date, carrier, tracking_no, postage, status, note, created_by, created_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+const parcelArgs = (p) => [p.company_id, p.customer, p.customer2 || '', p.destination, p.sent_date, p.carrier, p.tracking_no, p.postage ?? null, p.status, p.note];
 
 async function createParcel(p, userId, t = now()) {
   const tx = await client.transaction('write');
@@ -549,7 +559,7 @@ function updateStatements(old, p, userId, t, reason = '') {
   return [
     { sql: 'INSERT INTO parcel_edits (parcel_id, edited_by, edited_at, before, after, reason) VALUES (?, ?, ?, ?, ?, ?)',
       args: [old.id, userId, t, JSON.stringify(before), JSON.stringify(after), reason] },
-    { sql: `UPDATE parcels SET company_id = ?, customer = ?, destination = ?, sent_date = ?, carrier = ?, tracking_no = ?, postage = ?, status = ?, note = ?,
+    { sql: `UPDATE parcels SET company_id = ?, customer = ?, customer2 = ?, destination = ?, sent_date = ?, carrier = ?, tracking_no = ?, postage = ?, status = ?, note = ?,
               updated_by = ?, updated_at = ? WHERE id = ?`, args: [...parcelArgs(p), userId, t, old.id] },
     ...(changedReceipts ? [{ sql: 'DELETE FROM parcel_receipts WHERE parcel_id = ?', args: [old.id] }, ...insertReceipts(old.id, p.receipts)] : []),
   ];
@@ -602,6 +612,7 @@ app.post('/api/parcels/:id/delete', admin, async (req, res) => {
 const IMPORT_COLS = {
   receipt_no: ['เลขที่ใบเสร็จ', 'เลขที่ใบเสร็จรับเงิน', 'เลขใบเสร็จ', 'ใบเสร็จเลขที่', 'ใบเสร็จ', 'receiptno', 'receipt'],
   bill_date: ['วันที่ตัดบิล', 'วันตัดบิล', 'ตัดบิล', 'วันที่บิล', 'วันที่ใบเสร็จ', 'billdate'],
+  customer2: ['ชื่อบรรทัดที่ 2', 'บรรทัดที่ 2', 'หน่วยงาน', 'แผนก'],
   customer: ['ชื่อลูกค้า', 'ลูกค้า', 'ชื่อบริษัท', 'customer'],
   sent_date: ['วันที่ส่ง', 'วันส่ง', 'วันที่จัดส่ง', 'sentdate'],
   destination: ['ส่งไปที่', 'ที่อยู่จัดส่ง', 'ที่อยู่', 'ผู้รับ', 'สถานที่ส่ง', 'address'],
@@ -712,7 +723,7 @@ app.post('/api/import', auth, async (req, res) => {
         if (dt === null) fail(400, `${k === 'bill_date' ? 'วันที่ตัดบิล' : 'วันที่ส่ง'} "${get(k)}" อ่านไม่ได้ (ใช้ วว/ดด/ปปปป)`);
         if (dt) v[k] = dt;
       }
-      for (const k of ['customer', 'destination', 'carrier', 'note']) { const s = str(get(k), 500); if (s) v[k] = s; }
+      for (const k of ['customer', 'customer2', 'destination', 'carrier', 'note']) { const s = str(get(k), 500); if (s) v[k] = s; }
       const cname = str(get('company'), 200);
       if (cname) {
         const co = companies.find((c) => c.name === cname);
@@ -794,6 +805,7 @@ app.post('/api/import', auth, async (req, res) => {
 
 // สมุดที่อยู่: 1 แถว = ลูกค้า 1 ราย; ชื่อซ้ำกับที่มีอยู่ → อัปเดตที่อยู่ (mode update) หรือข้าม (mode skip)
 const CUSTOMER_ALIASES = makeAliases({
+  name2: ['ชื่อบรรทัดที่ 2', 'บรรทัดที่ 2', 'บรรทัด 2', 'หน่วยงาน', 'แผนก', 'ฝ่าย', 'department'],
   name: ['ชื่อลูกค้า', 'ลูกค้า', 'ชื่อบริษัท', 'ชื่อ', 'customer', 'name'],
   address: ['ที่อยู่จัดส่ง', 'ที่อยู่', 'ส่งไปที่', 'address'],
   phone: ['เบอร์โทรศัพท์', 'เบอร์โทร', 'โทรศัพท์', 'โทร', 'phone', 'tel'],
@@ -812,13 +824,13 @@ app.post('/api/customers/import', auth, async (req, res) => {
     });
   }
   if (!best) fail(400, 'ไม่พบหัวคอลัมน์ "ชื่อลูกค้า" และ "ที่อยู่" ในไฟล์');
-  const existing = new Map((await db.all('SELECT id, name, address, phone, note FROM customers')).map((c) => [c.name, c]));
+  const existing = new Map((await db.all('SELECT id, name, name2, address, phone, note FROM customers')).map((c) => [c.name, c]));
   const update = req.body.mode === 'update', seen = new Set(), adds = [], ups = [], errors = [];
   let skipped = 0;
   for (let i = best.headIdx + 1; i < best.grid.length; i++) {
     const row = best.grid[i], get = (k) => (k in best.map ? row[best.map[k]] : '');
     if (!Object.values(best.map).some((c) => String(row[c] ?? '').trim())) continue;
-    const c = { name: str(get('name'), 200), address: str(get('address'), 500), phone: str(get('phone'), 100), note: str(get('note'), 300) };
+    const c = { name: str(get('name'), 200), name2: str(get('name2'), 200), address: str(get('address'), 500), phone: str(get('phone'), 100), note: str(get('note'), 300) };
     if (!c.name) { errors.push({ line: i + 1, msg: 'ไม่มีชื่อลูกค้า' }); continue; }
     if (seen.has(c.name)) { errors.push({ line: i + 1, msg: `ชื่อ "${c.name}" ซ้ำกับแถวก่อนหน้า` }); continue; }
     seen.add(c.name);
@@ -827,7 +839,7 @@ app.post('/api/customers/import', auth, async (req, res) => {
     else if (!update) skipped++;
     else {
       const merged = { ...ex, ...Object.fromEntries(Object.entries(c).filter(([, v]) => v)) };
-      if (['address', 'phone', 'note'].some((k) => merged[k] !== ex[k])) ups.push(merged); else skipped++;
+      if (['name2', 'address', 'phone', 'note'].some((k) => merged[k] !== ex[k])) ups.push(merged); else skipped++;
     }
   }
   const summary = { add: adds.length, update: ups.length, skipped, errors: errors.slice(0, 100), errorCount: errors.length, preview: [...adds, ...ups].slice(0, 30) };
@@ -835,10 +847,10 @@ app.post('/api/customers/import', auth, async (req, res) => {
   if (!adds.length && !ups.length) fail(400, 'ไม่มีรายการให้นำเข้า');
   const t = now();
   await client.batch([
-    ...adds.map((c) => ({ sql: 'INSERT INTO customers (name, address, phone, note, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-      args: [c.name, c.address, c.phone, c.note, req.user.id, t] })),
-    ...ups.map((c) => ({ sql: 'UPDATE customers SET address = ?, phone = ?, note = ?, updated_by = ?, updated_at = ? WHERE id = ?',
-      args: [c.address, c.phone, c.note, req.user.id, t, c.id] })),
+    ...adds.map((c) => ({ sql: 'INSERT INTO customers (name, name2, address, phone, note, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      args: [c.name, c.name2, c.address, c.phone, c.note, req.user.id, t] })),
+    ...ups.map((c) => ({ sql: 'UPDATE customers SET name2 = ?, address = ?, phone = ?, note = ?, updated_by = ?, updated_at = ? WHERE id = ?',
+      args: [c.name2, c.address, c.phone, c.note, req.user.id, t, c.id] })),
   ], 'write');
   res.json({ ...summary, committed: true });
 });
@@ -858,8 +870,11 @@ app.get('/api/manifest-draft', auth, async (req, res) => {
   const co = await db.get('SELECT * FROM companies WHERE id = ?', company);
   if (!co) fail(400, 'เลือกบริษัทผู้ส่ง');
   if (!isDate(date)) fail(400, 'เลือกวันที่ฝากส่ง');
-  const parcels = await db.all(`SELECT id, customer, destination, carrier, tracking_no, postage, note FROM parcels
-    WHERE deleted = 0 AND company_id = ? AND sent_date = ? AND carrier LIKE 'ไปรษณีย์ไทย%' ORDER BY id`, company, date);
+  // ซองของบริษัทที่ส่งวันนั้น + ซองที่ยังไม่ใส่วันที่ส่ง (รอส่ง) — ส่งทางไปรษณีย์ไทย หรือยังไม่ได้เลือกส่งทาง
+  const parcels = await db.all(`SELECT id, customer, customer2, destination, carrier, tracking_no, postage, note, sent_date, created_at FROM parcels
+    WHERE deleted = 0 AND company_id = ? AND (sent_date = ? OR sent_date = '') AND (carrier LIKE 'ไปรษณีย์ไทย%' OR carrier = '')
+    ORDER BY sent_date DESC, id`, company, date);
+  const thaiDay = (iso) => new Date(new Date(iso).getTime() + 7 * 3600e3).toISOString().slice(0, 10); // วันที่ตามเวลาไทย
   // ซองที่อยู่ในใบนำส่งที่บันทึกไปแล้ว
   const saved = await db.all('SELECT id, sent_date, rows FROM manifests WHERE company_id = ?', company);
   const inManifest = new Map();
@@ -871,8 +886,10 @@ app.get('/api/manifest-draft', auth, async (req, res) => {
   const last = await db.get('SELECT book_no, doc_no, dept FROM manifests WHERE company_id = ? ORDER BY id DESC LIMIT 1', company);
   const nextDoc = last && /^\d+$/.test(last.doc_no) ? String(Number(last.doc_no) + 1).padStart(last.doc_no.length, '0') : '';
   res.json({
-    rows: parcels.map((p) => ({ parcel_id: p.id, recipient: p.customer, dest: destOf(p.destination), service: serviceOf(p.carrier),
-      tracking: p.tracking_no, postage: baht(p.postage), note: '', in_round: inManifest.get(p.id) || null })),
+    rows: parcels.map((p) => ({ parcel_id: p.id, recipient: [p.customer, p.customer2].filter(Boolean).join(' '), dest: destOf(p.destination), service: serviceOf(p.carrier),
+      tracking: p.tracking_no, postage: baht(p.postage), note: '', in_round: inManifest.get(p.id) || null,
+      // ยังไม่ใส่วันที่ส่ง: ติ๊กให้ถ้าบันทึกซองวันเดียวกับวันที่ฝากส่ง
+      pending: !p.sent_date, checked: !inManifest.has(p.id) && (p.sent_date === date || thaiDay(p.created_at) === date) })),
     header: { round_no: count + 1, carried_in: prev ? (prev.carried_in + prev.total) / 100 : 0, book_no: last?.book_no || '',
       doc_no: nextDoc, dept: last?.dept || '', permit_no: co.permit_no, post_office: co.permit_office },
   });
@@ -925,13 +942,16 @@ app.post('/api/manifests', auth, async (req, res) => {
     if (!r.parcel_id) continue;
     const old = await db.get('SELECT * FROM parcels WHERE id = ? AND deleted = 0 AND company_id = ?', r.parcel_id, company_id);
     if (!old) continue;
-    const carrier = r.service ? `ไปรษณีย์ไทย (${r.service})` : old.carrier;
-    const before = {}, after = {};
-    if (old.carrier !== carrier) { before.carrier = old.carrier; after.carrier = carrier; }
-    if (!Object.keys(before).length) continue;
+    // ใส่ในใบนำส่ง = ส่งแล้ว: เติมประเภทบริการ เลขพัสดุ และวันที่ส่ง (ถ้ายังว่าง) กลับไปที่ซอง
+    const next = { carrier: r.service ? `ไปรษณีย์ไทย (${r.service})` : old.carrier,
+      tracking_no: r.tracking || old.tracking_no, sent_date: old.sent_date || b.sent_date, status: old.status === 'pending' ? 'sent' : old.status };
+    const keys = Object.keys(next).filter((k) => old[k] !== next[k]);
+    if (!keys.length) continue;
+    const before = Object.fromEntries(keys.map((k) => [k, old[k]])), after = Object.fromEntries(keys.map((k) => [k, next[k]]));
     stmts.push({ sql: 'INSERT INTO parcel_edits (parcel_id, edited_by, edited_at, before, after, reason) VALUES (?, ?, ?, ?, ?, ?)',
       args: [old.id, req.user.id, t, JSON.stringify(before), JSON.stringify(after), `ใบนำส่งไปรษณีย์ วันที่ ${thDate(b.sent_date)}`] },
-    { sql: 'UPDATE parcels SET carrier = ?, updated_by = ?, updated_at = ? WHERE id = ?', args: [carrier, req.user.id, t, old.id] });
+    { sql: `UPDATE parcels SET ${keys.map((k) => `${k} = ?`).join(', ')}, updated_by = ?, updated_at = ? WHERE id = ?`,
+      args: [...keys.map((k) => next[k]), req.user.id, t, old.id] });
   }
   const tx = await client.transaction('write');
   try {
@@ -965,11 +985,11 @@ app.get('/api/export.xlsx', auth, async (req, res) => {
   const f = listFilter(req.query);
   const rows = await withReceipts(await db.all(`SELECT ${PARCEL_COLS} ${PARCEL_FROM} WHERE ${f.sql} ${ORDER}`, ...f.args));
   const coName = Object.fromEntries((await db.all('SELECT id, name FROM companies')).map((c) => [c.id, c.name]));
-  const aoa = [['ซองที่', 'บริษัทผู้ส่ง', 'เลขที่ใบเสร็จ', 'ชื่อลูกค้า', 'ยอดเงิน', 'รายละเอียดสินค้า', 'ส่งถึง', 'วันที่ส่ง', 'ส่งไปที่', 'ส่งทาง', 'เลขพัสดุ', 'สถานะ', 'หมายเหตุ', 'ผู้บันทึก']];
+  const aoa = [['ซองที่', 'บริษัทผู้ส่ง', 'เลขที่ใบเสร็จ', 'ชื่อลูกค้า', 'ยอดเงิน', 'รายละเอียดสินค้า', 'ส่งถึง', 'ส่งถึง บรรทัดที่ 2', 'วันที่ส่ง', 'ส่งไปที่', 'ส่งทาง', 'เลขพัสดุ', 'สถานะ', 'หมายเหตุ', 'ผู้บันทึก']];
   for (const p of rows) for (const r of p.receipts)
-    aoa.push([p.id, coName[p.company_id] || '', r.receipt_no, r.customer || p.customer, r.amount == null ? '' : r.amount / 100, r.detail, p.customer, thDate(p.sent_date), p.destination, p.carrier, p.tracking_no, STATUS_TH[p.status], p.note, p.created_name]);
+    aoa.push([p.id, coName[p.company_id] || '', r.receipt_no, r.customer || p.customer, r.amount == null ? '' : r.amount / 100, r.detail, p.customer, p.customer2, thDate(p.sent_date), p.destination, p.carrier, p.tracking_no, STATUS_TH[p.status], p.note, p.created_name]);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [7, 28, 16, 32, 14, 36, 32, 12, 50, 22, 18, 16, 30, 18].map((wch) => ({ wch }));
+  ws['!cols'] = [7, 28, 16, 32, 14, 36, 32, 28, 12, 50, 22, 18, 16, 30, 18].map((wch) => ({ wch }));
   for (let i = 1; i < aoa.length; i++) { const c = ws[XLSX.utils.encode_cell({ r: i, c: 4 })]; if (c && c.t === 'n') c.z = '#,##0.00'; }
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'การส่งใบเสร็จ');
