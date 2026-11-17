@@ -303,3 +303,5 @@ table.mf-edit .mf-n { color: var(--mute); text-align: right; }
 /* ตารางรายการใบนำส่ง: ตัวหนังสือกึ่งกลางแนวตั้ง และใหญ่ขึ้น 1 ระดับ (14pt) */
 .mf-page .mf-list th, .mf-page .mf-list td { vertical-align: middle; font-size: 14pt; }
 .mf-page .mf-list .mf-hint, .mf-page .mf-list .mf-small { font-size: 13pt !important; }
+.cust2 { font-size: .9em; }
+.env-name2 { font-size: 18pt; }

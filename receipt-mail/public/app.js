@@ -237,7 +237,8 @@ function parcelFields(p = {}) {
       <label class="company-pick"><span>ส่งในนามบริษัท <b class="req">*</b></span>
         <select name="company_id" required>${companyOptions(p.company_id || lastCompanyId())}</select></label>
       <div class="grid">
-        <label class="span2"><span>ส่งถึง (ชื่อลูกค้าผู้รับ) <b class="req">*</b></span><input name="customer" required list="custList" value="${esc(p.customer)}" autocomplete="off"></label>
+        <label class="span2"><span>ส่งถึง (ชื่อลูกค้าผู้รับ) บรรทัดที่ 1 <b class="req">*</b></span><input name="customer" required list="custList" value="${esc(p.customer)}" autocomplete="off"></label>
+        <label class="span2"><span>บรรทัดที่ 2 <span class="mute">(เช่น หน่วยงาน / ฝ่าย — เว้นว่างได้)</span></span><input name="customer2" value="${esc(p.customer2)}" autocomplete="off"></label>
         <label><span>วันที่ส่ง <span class="mute">(ว่าง = ยังไม่ส่ง)</span></span><input name="sent_date" type="date" value="${esc(p.sent_date)}"></label>
         <label>สถานะ<select name="status"><option value="">อัตโนมัติ (ตามวันที่ส่ง)</option>${statusOpts}</select></label>
         <label>ส่งทาง<input name="carrier" list="carrierList" value="${esc(p.carrier)}" autocomplete="off"></label>
@@ -329,9 +330,11 @@ async function wireParcelForm(form, excludeId = 0) {
       if (btn) btn.onclick = () => { f.destination.value = c.address; autoFilled = c.address; showHint(); };
     }
   };
+  let autoFilled2 = f.customer2.value;
   const fillFromBook = () => {
     const c = book();
     if (c && (!f.destination.value.trim() || f.destination.value === autoFilled)) { f.destination.value = c.address; autoFilled = c.address; }
+    if (c && (!f.customer2.value.trim() || f.customer2.value === autoFilled2)) { f.customer2.value = c.name2 || ''; autoFilled2 = f.customer2.value; }
     showHint();
   };
   f.customer.addEventListener('input', () => { if (book()) fillFromBook(); else showHint(); });
@@ -380,7 +383,8 @@ function newPage() {
       <div class="grow"><b>✓ บันทึกซองของ ${esc(last.customer)} แล้ว</b>
         <div class="mute">${last.receipts.length} ใบ: ${esc(last.receipts.map((r) => r.receipt_no).join(', '))}</div></div>
       <button type="button" class="btn" data-print="env" data-ids="${last.id}">พิมพ์หน้าซอง</button>
-      <button type="button" class="btn" data-print="slip" data-ids="${last.id}">พิมพ์ใบรายการใบเสร็จ</button></div>` : ''}
+      <button type="button" class="btn" data-print="slip" data-ids="${last.id}">พิมพ์ใบรายการใบเสร็จ</button>
+      <button type="button" class="btn ghost" id="toManifest">ออกใบนำส่งไปรษณีย์</button></div>` : ''}
     <p class="mute">1 ซอง = พัสดุ 1 ชิ้นที่ส่งให้ลูกค้า ใส่ใบเสร็จทุกใบที่อยู่ในซองนั้น แล้วกรอกข้อมูลการส่งครั้งเดียว</p>
     <div class="card"><form>${parcelFields()}
       <div class="err"></div><div class="actions"><button class="btn" type="submit">บันทึกซอง</button></div></form></div>
@@ -402,6 +406,7 @@ function newPage() {
     } catch (e) { toast(e.message, true); }
     finally { btn.disabled = false; }
   }));
+  if (last) $('#toManifest').onclick = () => { MF.company = Number(last.company_id); MF.date = last.sent_date || today(); go('manifest'); };
   const form = $('#main form');
   wireParcelForm(form);
   if (!last) $('.r-no', form).focus();
@@ -485,7 +490,7 @@ async function load() {
       <th class="noprint pickcell"><input type="checkbox" id="pickAll" title="เลือกทั้งหมด" aria-label="เลือกทั้งหมด"></th><th>ลูกค้า / ใบเสร็จในซอง</th><th>วันที่ส่ง</th><th>ส่งไปที่</th><th>ส่งทาง</th><th>เลขพัสดุ</th><th>สถานะ</th></tr></thead>
     <tbody>${rows.map((p) => `<tr class="click ${p.status}" data-id="${p.id}">
       <td class="noprint pickcell"><input type="checkbox" class="pick" value="${p.id}" aria-label="เลือกซอง ${esc(p.customer)}"></td>
-      <td class="cust">${multiCompany() ? `<div class="co-tag">${esc(companyOf(p.company_id).name)}</div>` : ''}<b>${esc(p.customer)}</b>${p.edit_count
+      <td class="cust">${multiCompany() ? `<div class="co-tag">${esc(companyOf(p.company_id).name)}</div>` : ''}<b>${esc(p.customer)}</b>${p.customer2 ? `<div class="cust2">${esc(p.customer2)}</div>` : ''}${p.edit_count
         ? ` <span class="edited" title="แก้ล่าสุดโดย ${esc(p.updated_name)} ${thTime(p.updated_at)}">✎ แก้ไข ${p.edit_count} ครั้ง</span>` : ''}${receiptChips(p)}${p.note ? `<div class="mute">${esc(p.note)}</div>` : ''}</td>
       <td class="nowrap" data-l="วันที่ส่ง">${thDate(p.sent_date) || '<span class="mute">-</span>'}</td>
       <td class="addr" data-l="ส่งไปที่">${esc(p.destination).replace(/\n/g, '<br>') || '<span class="mute">-</span>'}</td>
@@ -512,7 +517,7 @@ function selChanged() {
   $('#selCount').textContent = `เลือก ${n} ซอง`;
 }
 
-const FIELD_TH = { company_id: 'บริษัทผู้ส่ง', customer: 'ลูกค้า', sent_date: 'วันที่ส่ง', destination: 'ส่งไปที่', carrier: 'ส่งทาง', tracking_no: 'เลขพัสดุ', postage: 'ค่าบริการ',
+const FIELD_TH = { company_id: 'บริษัทผู้ส่ง', customer: 'ลูกค้า', customer2: 'ลูกค้า บรรทัดที่ 2', sent_date: 'วันที่ส่ง', destination: 'ส่งไปที่', carrier: 'ส่งทาง', tracking_no: 'เลขพัสดุ', postage: 'ค่าบริการ',
   status: 'สถานะ', note: 'หมายเหตุ', receipts: 'ใบเสร็จในซอง' };
 // ประวัติการแก้ไข: ใครแก้ เมื่อไร หมายเหตุ และแต่ละช่อง ค่าเดิม → ค่าใหม่
 function histHtml(edits) {
@@ -595,6 +600,7 @@ function envelopeHtml(p, opt) {
       ${permitHtml(co)}
       <div class="env-to"><div class="env-label">กรุณาส่ง</div>
         ${showName ? `<div class="env-name">${esc(p.customer)}</div>` : ''}
+        ${p.customer2 ? `<div class="env-name2">${esc(p.customer2)}</div>` : ''}
         <div class="env-addr">${nl(address) || (showName ? '' : esc(p.customer))}</div>
         ${postcode ? `<div class="env-zip">${[...postcode].map((c) => `<span>${c}</span>`).join('')}</div>` : ''}
       </div>
@@ -665,7 +671,7 @@ function slipHtml(p, opt) {
   return `<div class="slip-page">
     <div class="slip-head"><div><div class="slip-org">${esc(co.name)}</div><div class="slip-small">${nl(co.address)}${co.phone ? `<br>โทร ${esc(co.phone)}` : ''}</div></div></div>
     <h1 class="slip-title">รายการใบเสร็จรับเงินที่จัดส่ง</h1>
-    <table class="slip-info"><tr><th>เรียน</th><td><b>${esc(p.customer)}</b>${p.destination ? `<br>${nl(p.destination)}` : ''}</td></tr>
+    <table class="slip-info"><tr><th>เรียน</th><td><b>${esc(p.customer)}</b>${p.customer2 ? `<br>${esc(p.customer2)}` : ''}${p.destination ? `<br>${nl(p.destination)}` : ''}</td></tr>
       ${p.carrier || p.tracking_no ? `<tr><th>จัดส่งทาง</th><td>${esc(p.carrier) || '-'}${p.tracking_no ? ` &nbsp; เลขพัสดุ <b>${esc(p.tracking_no)}</b>` : ''}</td></tr>` : ''}</table>
     <p>ขอนำส่งใบเสร็จรับเงิน จำนวน <b>${p.receipts.length}</b> ฉบับ ตามรายการดังต่อไปนี้</p>
     <table class="slip-list"><thead><tr><th class="c">ลำดับ</th><th>เลขที่ใบเสร็จ</th>${showCust ? '<th>ชื่อลูกค้า</th>' : ''}${opt.detail ? '<th>รายละเอียดสินค้า</th>' : ''}${showAmt ? '<th class="num">จำนวนเงิน (บาท)</th>' : ''}<th class="c">ตรวจรับ</th></tr></thead>
@@ -814,7 +820,7 @@ async function manifestPage() {
   MF.company ||= lastCompanyId();
   MF.date ||= today();
   $('#main').innerHTML = `<h2>ใบนำส่งไปรษณีย์</h2>
-    <p class="mute">ใบนำส่งสิ่งของทางไปรษณีย์โดยชำระค่าบริการเป็นเงินสินเชื่อ · เลือกบริษัทและวันที่ฝากส่ง ระบบจะดึงซองที่ส่งทาง "ไปรษณีย์ไทย" ของวันนั้นมาให้ ตรวจ/แก้ แล้วบันทึกและพิมพ์ (ไม่ระบุราคา แสดงเฉพาะจำนวนชิ้น)</p>
+    <p class="mute">ใบนำส่งสิ่งของทางไปรษณีย์โดยชำระค่าบริการเป็นเงินสินเชื่อ · เลือกบริษัทและวันที่ฝากส่ง ระบบจะดึงซองที่บันทึกไว้มาให้ (ซองที่ส่งวันนั้น และซองที่ยังไม่ใส่วันที่ส่ง) ตรวจ/แก้ แล้วบันทึกและพิมพ์ (ไม่ระบุราคา แสดงเฉพาะจำนวนชิ้น)</p>
     <div class="card"><div class="bar">
       <label>บริษัทผู้ส่ง<select id="mfCo">${companyOptions(MF.company)}</select></label>
       <label>วันที่ฝากส่ง<input id="mfDate" type="date" value="${MF.date}"></label>
@@ -827,9 +833,9 @@ async function manifestPage() {
 }
 
 const mfRow = (r = {}) => `<tr class="mfrow">
-  <td class="c"><input type="checkbox" class="mf-on" ${r.in_round ? '' : 'checked'} aria-label="ใส่ในใบนำส่ง"></td>
+  <td class="c"><input type="checkbox" class="mf-on" ${(r.checked ?? !r.in_round) ? 'checked' : ''} aria-label="ใส่ในใบนำส่ง"></td>
   <td class="mf-n"></td>
-  <td><input class="mf-rec" value="${esc(r.recipient)}" aria-label="ผู้รับ">${r.in_round ? `<div class="mute">อยู่ในใบนำส่งวันที่ ${thDate(r.in_round)} แล้ว</div>` : ''}</td>
+  <td><input class="mf-rec" value="${esc(r.recipient)}" aria-label="ผู้รับ">${r.in_round ? `<div class="mute">อยู่ในใบนำส่งวันที่ ${thDate(r.in_round)} แล้ว</div>` : r.pending ? '<div class="mute">ยังไม่ใส่วันที่ส่ง — บันทึกใบนำส่งแล้วจะใส่วันที่ส่งให้ซอง</div>' : ''}</td>
   <td><input class="mf-dest" value="${esc(r.dest)}" inputmode="numeric" maxlength="10" placeholder="รหัสไปรษณีย์" aria-label="ปลายทาง (รหัสไปรษณีย์)"></td>
   <td><select class="mf-svc" aria-label="ประเภทบริการ"><option value="">-</option>${S.postServices.map((x) => `<option ${x === r.service ? 'selected' : ''}>${x}</option>`).join('')}</select></td>
   <td><input class="mf-trk" value="${esc(r.tracking)}" aria-label="เลขที่บริการ"></td>
@@ -903,7 +909,6 @@ function manifestHtml(m) {
   const co = companyOf(m.company_id);
   const rows = [...m.rows];
   while (rows.length < 10 || rows.length % 10) rows.push(null);
-  const normal = m.rows.filter((r) => r.service === 'ธรรมดา').length;
   return `<div class="mf-page">
     <div class="mf-top"><span>เล่มที่ <span class="mf-fill">${esc(m.book_no)}</span></span><span class="mf-docno">เลขที่ <span class="mf-fill">${esc(m.doc_no)}</span></span></div>
     <div class="mf-head">
@@ -922,8 +927,8 @@ function manifestHtml(m) {
       <tbody>${rows.map((r, i) => `<tr><td class="c">${i + 1}</td><td>${r ? esc(r.recipient) : ''}</td><td>${r ? esc(r.dest) : ''}</td><td class="c">${r ? esc(r.service) : ''}</td>
         <td class="mono">${r ? esc(r.tracking) : ''}</td><td></td><td>${r ? esc(r.note) : ''}</td></tr>`).join('')}</tbody>
       <tfoot><tr><td colspan="4" rowspan="2" class="mf-hint"><u>หมายเหตุ</u> ช่องประเภทบริการให้ระบุบริการที่ฝากส่ง เช่น ลงทะเบียน รับรอง EMS รับประกัน พัสดุ หรือ พกง. เป็นต้น</td>
-        <td class="mf-small">ไปรษณีย์ภัณฑ์ธรรมดารวม Express จำนวน ${normal || '......'} ชิ้น</td><td></td><td></td></tr>
-        <tr><td class="c"><b>รวมทั้งสิ้น</b></td><td colspan="2" class="c"><b>${m.rows.length} ชิ้น</b></td></tr></tfoot></table>
+        <td class="mf-small">ไปรษณีย์ภัณฑ์ธรรมดารวม Express จำนวน <b>${m.rows.length}</b> ชิ้น</td><td></td><td></td></tr>
+        <tr><td class="c"><b>รวมทั้งสิ้น</b></td><td></td><td></td></tr></tfoot></table>
     <div class="mf-bottom">
       <div class="mf-sumbox"><div class="mf-sumtitle">สรุปยอดฝากส่งครั้งนี้</div>
         <table class="mf-sum"><thead><tr><th rowspan="2">ประเภท<br>บริการ</th><th colspan="2">ในประเทศ (ยอดรวม)</th><th colspan="2">ต่างประเทศ (ยอดรวม)</th><th rowspan="2">รวมเงิน<br>(1+2)</th></tr>
@@ -1029,9 +1034,9 @@ async function customersPage() {
   const list = await loadCustomers(true);
   const render = () => {
     const q = custQ.trim().toLowerCase();
-    const rows = list.filter((c) => !q || [c.name, c.address, c.phone, c.note].some((x) => (x || '').toLowerCase().includes(q)));
+    const rows = list.filter((c) => !q || [c.name, c.name2, c.address, c.phone, c.note].some((x) => (x || '').toLowerCase().includes(q)));
     $('#ctbl').innerHTML = rows.length ? `<table class="ctable"><thead><tr><th>ชื่อลูกค้า</th><th>ที่อยู่</th><th>เบอร์โทร</th><th></th></tr></thead>
-      <tbody>${rows.map((c) => `<tr class="click" data-cid="${c.id}"><td><b>${esc(c.name)}</b>${c.note ? `<div class="mute">${esc(c.note)}</div>` : ''}</td>
+      <tbody>${rows.map((c) => `<tr class="click" data-cid="${c.id}"><td><b>${esc(c.name)}</b>${c.name2 ? `<div>${esc(c.name2)}</div>` : ''}${c.note ? `<div class="mute">${esc(c.note)}</div>` : ''}</td>
         <td class="addr" data-l="ที่อยู่">${esc(c.address).replace(/\n/g, '<br>') || '<span class="mute">ยังไม่มีที่อยู่</span>'}</td>
         <td class="nowrap" data-l="โทร">${esc(c.phone) || '<span class="mute">-</span>'}</td>
         <td class="nowrap"><button class="btn ghost sm" data-edit="${c.id}">แก้ไข</button></td></tr>`).join('')}</tbody></table>
@@ -1045,7 +1050,8 @@ async function customersPage() {
 
 function customerDialog(c) {
   const d = dialog(`<h3>${c ? 'แก้ไขข้อมูลลูกค้า' : 'เพิ่มลูกค้า'}</h3><form>
-    <label><span>ชื่อลูกค้า <b class="req">*</b></span><input name="name" required value="${esc(c?.name)}" autocomplete="off"></label>
+    <label><span>ชื่อลูกค้า บรรทัดที่ 1 <b class="req">*</b></span><input name="name" required value="${esc(c?.name)}" autocomplete="off" placeholder="เช่น คุณสมชาย ใจดี"></label>
+    <label>บรรทัดที่ 2 <span class="mute">(เช่น หน่วยงาน / ฝ่าย — เว้นว่างได้)</span><input name="name2" value="${esc(c?.name2)}" autocomplete="off" placeholder="เช่น ฝ่ายการเงิน โรงเรียนบ้านหนองบัว"></label>
     <label>ที่อยู่สำหรับส่งเอกสาร (ชื่อผู้รับ / ที่อยู่ / รหัสไปรษณีย์)<textarea name="address" rows="4">${esc(c?.address)}</textarea></label>
     <label>เบอร์โทร<input name="phone" value="${esc(c?.phone)}" autocomplete="off"></label>
     <label>หมายเหตุ<input name="note" value="${esc(c?.note)}" placeholder="เช่น ส่งถึงฝ่ายบัญชี คุณ…"></label>
