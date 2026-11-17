@@ -886,7 +886,7 @@ app.get('/api/manifest-draft', auth, async (req, res) => {
   const last = await db.get('SELECT book_no, doc_no, dept FROM manifests WHERE company_id = ? ORDER BY id DESC LIMIT 1', company);
   const nextDoc = last && /^\d+$/.test(last.doc_no) ? String(Number(last.doc_no) + 1).padStart(last.doc_no.length, '0') : '';
   res.json({
-    rows: parcels.map((p) => ({ parcel_id: p.id, recipient: [p.customer, p.customer2].filter(Boolean).join(' '), dest: destOf(p.destination), service: serviceOf(p.carrier),
+    rows: parcels.map((p) => ({ parcel_id: p.id, recipient: p.customer, dest: destOf(p.destination), service: serviceOf(p.carrier),
       tracking: p.tracking_no, postage: baht(p.postage), note: '', in_round: inManifest.get(p.id) || null,
       // ยังไม่ใส่วันที่ส่ง: ติ๊กให้ถ้าบันทึกซองวันเดียวกับวันที่ฝากส่ง
       pending: !p.sent_date, checked: !inManifest.has(p.id) && (p.sent_date === date || thaiDay(p.created_at) === date) })),
@@ -907,11 +907,13 @@ app.get('/api/manifests/:id', auth, async (req, res) => {
   if (!m) fail(404, 'ไม่พบใบนำส่ง');
   const out = manifestOut(m);
   // ใบที่บันทึกก่อนเปลี่ยนปลายทางเป็นรหัสไปรษณีย์ (ปลายทางเป็นชื่อจังหวัด) → ใช้รหัสไปรษณีย์จากที่อยู่ของซอง
+  // และผู้รับเป็นชื่อบรรทัดที่ 1 อย่างเดียว (ใบที่บันทึกตอนผู้รับยังรวมบรรทัดที่ 2)
   for (const r of out.rows) {
-    if (!r.parcel_id || /^\d{5}$/.test(r.dest || '')) continue;
-    const p = await db.get('SELECT destination FROM parcels WHERE id = ?', r.parcel_id);
-    const zip = p && destOf(p.destination);
-    if (zip) r.dest = zip;
+    if (!r.parcel_id) continue;
+    const p = await db.get('SELECT customer, customer2, destination FROM parcels WHERE id = ?', r.parcel_id);
+    if (!p) continue;
+    if (!/^\d{5}$/.test(r.dest || '')) { const zip = destOf(p.destination); if (zip) r.dest = zip; }
+    if (p.customer2 && r.recipient === `${p.customer} ${p.customer2}`) r.recipient = p.customer;
   }
   res.json(out);
 });
