@@ -820,7 +820,7 @@ async function manifestPage() {
   MF.company ||= lastCompanyId();
   MF.date ||= today();
   $('#main').innerHTML = `<h2>ใบนำส่งไปรษณีย์</h2>
-    <p class="mute">ใบนำส่งสิ่งของทางไปรษณีย์โดยชำระค่าบริการเป็นเงินสินเชื่อ · เลือกบริษัทและวันที่ฝากส่ง ระบบจะดึงซองที่บันทึกไว้มาให้ (ซองที่ส่งวันนั้น และซองที่ยังไม่ใส่วันที่ส่ง) ตรวจ/แก้ แล้วบันทึกและพิมพ์ (ไม่ระบุราคา แสดงเฉพาะจำนวนชิ้น)</p>
+    <p class="mute">ใบนำส่งสิ่งของทางไปรษณีย์โดยชำระค่าบริการเป็นเงินสินเชื่อ · เลือกบริษัทและวันที่ฝากส่ง ระบบจะดึงซองที่บันทึกไว้มาให้ (ซองที่ส่งวันนั้น และซองที่ยังไม่ใส่วันที่ส่ง — ซองที่ออกใบนำส่งแล้วจะไม่ดึงมาอีก) ตรวจ/แก้ แล้วบันทึกและพิมพ์ (ไม่ระบุราคา แสดงเฉพาะจำนวนชิ้น)</p>
     <div class="card"><div class="bar">
       <label>บริษัทผู้ส่ง<select id="mfCo">${companyOptions(MF.company)}</select></label>
       <label>วันที่ฝากส่ง<input id="mfDate" type="date" value="${MF.date}"></label>
@@ -858,7 +858,7 @@ async function loadDraft() {
       <label>ศฝ./ปณ.<input name="post_office" value="${esc(h.post_office)}"></label>
       <input type="hidden" name="round_no" value="${h.round_no}">
     </div></fieldset>
-    ${d.rows.length ? '' : '<p class="warn">ไม่มีซองที่ส่งทาง "ไปรษณีย์ไทย" ของบริษัทนี้ในวันที่เลือก (เช็กวันที่ส่งและช่องส่งทางของซอง) — เพิ่มแถวเองได้</p>'}
+    ${d.rows.length ? '' : '<p class="warn">ไม่มีซองที่ยังไม่ได้ออกใบนำส่งของบริษัทนี้ในวันที่เลือก (ซองที่ออกใบนำส่งแล้วจะไม่แสดง — พิมพ์ซ้ำได้จากรายการด้านล่าง) — เพิ่มแถวเองได้</p>'}
     <div class="tablewrap"><table class="mf-edit"><thead><tr><th>ใส่</th><th>#</th><th>ผู้รับ</th><th>ปลายทาง (รหัสไปรษณีย์)</th><th>ประเภทบริการ</th><th>เลขที่บริการ (13 หลัก)</th><th>หมายเหตุ</th></tr></thead>
       <tbody>${d.rows.map(mfRow).join('')}</tbody></table></div>
     <div class="bar" style="margin-top:8px"><button type="button" class="btn ghost sm" id="mfAdd">+ เพิ่มแถว</button>

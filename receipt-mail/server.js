@@ -886,7 +886,8 @@ app.get('/api/manifest-draft', auth, async (req, res) => {
   const last = await db.get('SELECT book_no, doc_no, dept FROM manifests WHERE company_id = ? ORDER BY id DESC LIMIT 1', company);
   const nextDoc = last && /^\d+$/.test(last.doc_no) ? String(Number(last.doc_no) + 1).padStart(last.doc_no.length, '0') : '';
   res.json({
-    rows: parcels.map((p) => ({ parcel_id: p.id, recipient: p.customer, dest: destOf(p.destination), service: serviceOf(p.carrier),
+    // ซองที่ออกใบนำส่งไปแล้ว ไม่ดึงมาอีก (พิมพ์ซ้ำได้จากใบเดิม)
+    rows: parcels.filter((p) => !inManifest.has(p.id)).map((p) => ({ parcel_id: p.id, recipient: p.customer, dest: destOf(p.destination), service: serviceOf(p.carrier),
       tracking: p.tracking_no, postage: baht(p.postage), note: '', in_round: inManifest.get(p.id) || null,
       // ยังไม่ใส่วันที่ส่ง: ติ๊กให้ถ้าบันทึกซองวันเดียวกับวันที่ฝากส่ง
       pending: !p.sent_date, checked: !inManifest.has(p.id) && (p.sent_date === date || thaiDay(p.created_at) === date) })),
@@ -935,6 +936,11 @@ app.post('/api/manifests', auth, async (req, res) => {
       tracking: normTracking(r.tracking), postage, note: str(r.note, 200) };
   }).filter((r) => r.recipient || r.tracking);
   if (!rows.length) fail(400, 'ไม่มีรายการในใบนำส่ง');
+  // กันออกใบนำส่งซ้ำ: ซองที่อยู่ในใบนำส่งใบอื่นแล้ว บันทึกไม่ได้
+  const used = new Map();
+  for (const m of await db.all('SELECT sent_date, rows FROM manifests')) for (const r of JSON.parse(m.rows)) if (r.parcel_id) used.set(r.parcel_id, m.sent_date);
+  const dup = rows.find((r) => r.parcel_id && used.has(r.parcel_id));
+  if (dup) fail(400, `ซองของ "${dup.recipient}" ออกใบนำส่งไปแล้ว (วันที่ ${thDate(used.get(dup.parcel_id))}) — โหลดหน้าใหม่แล้วลองอีกครั้ง`);
   const total = rows.reduce((t, r) => t + (r.postage || 0), 0);
   const round_no = Math.max(1, Math.min(999, Number(b.round_no) || 1)), t = now();
   const stmts = [{ sql: `INSERT INTO manifests (company_id, sent_date, round_no, book_no, doc_no, dept, permit_no, post_office, carried_in, total, rows, created_by, created_at)
