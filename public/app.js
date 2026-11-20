@@ -312,7 +312,7 @@ views.docs = async () => {
       || '<tr><td colspan="10" class="mute">ไม่พบเอกสาร</td></tr>';
   };
   $('#find').onclick = () => load().catch((e) => toast(e.message, true));
-  $('#q').onkeydown = (e) => e.key === 'Enter' && $('#find').click();
+  $('#q').onkeydown = (e) => { if (e.key === 'Enter') $('#find').click(); };
   $('#rows').onclick = async (e) => {
     const { edit: editId, cancel: id, no } = e.target.dataset;
     if (editId) {
