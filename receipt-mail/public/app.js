@@ -787,7 +787,7 @@ function importDialog() {
           `แถว ${e.line}${e.receipt_no ? ` (${esc(e.receipt_no)})` : ''}: ${esc(e.msg)}`).join('<br>')}</div>` : ''}
         ${r.preview.length ? `<div class="tablewrap" style="max-height:280px;overflow:auto;margin-top:8px"><table>
           <tr><th></th><th>ลูกค้า</th><th>ใบเสร็จ</th><th class="num">ยอดรวม</th><th>วันที่ส่ง</th><th>เลขพัสดุ</th></tr>
-          ${r.preview.map((p) => `<tr><td>${p.action === 'create' ? '<span class="tag received">ซองใหม่</span>' : '<span class="tag sent">อัปเดต</span>'}</td>
+          ${r.preview.map((p) => `<tr><td>${p.action === 'create' ? '<span class="tag new">ซองใหม่</span>' : '<span class="tag sent">อัปเดต</span>'}</td>
             <td>${esc(p.customer)}</td><td>${p.receipts.length} ใบ <span class="mute">${esc(p.receipts.map((x) => x.receipt_no).join(', '))}</span></td>
             <td class="num">${sumAmount(p.receipts) != null ? money(sumAmount(p.receipts)) : '-'}</td>
             <td class="nowrap">${thDate(p.sent_date) || '-'}</td><td class="track">${esc(p.tracking_no)}</td></tr>`).join('')}
@@ -980,8 +980,8 @@ async function summaryPage() {
   // รวมเป็นรายเดือน
   const months = new Map();
   for (const r of rows) {
-    const m = months.get(r.ym) || { ym: r.ym, parcels: 0, receipts: 0, pending: 0, sent: 0, received: 0, returned: 0 };
-    m.parcels += r.parcels; m.receipts += r.receipts; m[r.status] += r.parcels;
+    const m = months.get(r.ym) || { ym: r.ym, parcels: 0, receipts: 0, pending: 0, sent: 0, returned: 0 };
+    m.parcels += r.parcels; m.receipts += r.receipts; m[r.status === 'received' ? 'sent' : r.status] += r.parcels;
     months.set(r.ym, m);
   }
   const years = [...new Set([...months.keys()].filter(Boolean).map((ym) => ym.slice(0, 4)))].sort().reverse();
@@ -991,21 +991,21 @@ async function summaryPage() {
   $('#sy').onchange = () => { SUM.year = $('#sy').value; summaryPage(); };
   const pending = months.get('');
   const list = [...months.values()].filter((m) => m.ym && (!SUM.year || m.ym.startsWith(SUM.year)));
-  const total = list.reduce((t, m) => { for (const k of ['parcels', 'receipts', 'sent', 'received', 'returned']) t[k] += m[k]; return t; },
-    { parcels: 0, receipts: 0, sent: 0, received: 0, returned: 0 });
+  const total = list.reduce((t, m) => { for (const k of ['parcels', 'receipts', 'sent', 'returned']) t[k] += m[k]; return t; },
+    { parcels: 0, receipts: 0, sent: 0, returned: 0 });
   $('#sNote').textContent = [SUM.year ? `ปี ${Number(SUM.year) + 543}` : 'ทุกปี', SUM.company ? companyOf(SUM.company).name : ''].filter(Boolean).join(' · ');
   const n = (v) => (v ? v.toLocaleString() : '<span class="mute">-</span>');
   if (!list.length && !pending) { $('#stbl').innerHTML = '<p class="mute">ยังไม่มีข้อมูล — บันทึกซองที่หน้า "+ บันทึกซองใหม่"</p>'; return; }
   $('#stbl').innerHTML = `<table class="sumtable"><thead><tr><th>เดือนที่ส่ง</th><th class="num">ซองที่ส่ง</th><th class="num">ใบเสร็จ</th>
-      <th class="num">${tag('sent')}</th><th class="num">${tag('received')}</th><th class="num">${tag('returned')}</th></tr></thead>
+      <th class="num">${tag('sent')}</th><th class="num">${tag('returned')}</th></tr></thead>
     <tbody>
       ${pending ? `<tr class="click pending-row" data-pending="1"><td>ยังไม่ส่ง (รอส่ง)</td><td class="num">${n(pending.parcels)}</td><td class="num">${n(pending.receipts)}</td>
-        <td class="num" colspan="3"><span class="mute">ยังไม่มีวันที่ส่ง</span></td></tr>` : ''}
+        <td class="num" colspan="2"><span class="mute">ยังไม่มีวันที่ส่ง</span></td></tr>` : ''}
       ${list.map((m) => `<tr class="click" data-ym="${m.ym}"><td><b>${monthName(m.ym)}</b></td><td class="num">${n(m.parcels)}</td><td class="num">${n(m.receipts)}</td>
-        <td class="num">${n(m.sent)}</td><td class="num">${n(m.received)}</td><td class="num">${n(m.returned)}</td></tr>`).join('')}
+        <td class="num">${n(m.sent)}</td><td class="num">${n(m.returned)}</td></tr>`).join('')}
     </tbody>
     ${list.length ? `<tfoot><tr><td>รวม${SUM.year ? ` ปี ${Number(SUM.year) + 543}` : 'ทั้งหมด'}</td><td class="num">${n(total.parcels)}</td><td class="num">${n(total.receipts)}</td>
-      <td class="num">${n(total.sent)}</td><td class="num">${n(total.received)}</td><td class="num">${n(total.returned)}</td></tr></tfoot>` : ''}</table>`;
+      <td class="num">${n(total.sent)}</td><td class="num">${n(total.returned)}</td></tr></tfoot>` : ''}</table>`;
   // กดที่เดือน → หน้ารายการ กรองตามวันที่ส่งของเดือนนั้น
   $$('#stbl tr[data-ym]').forEach((tr) => (tr.onclick = () => {
     Object.assign(F, { q: '', status: '', from: `${tr.dataset.ym}-01`, to: monthEnd(tr.dataset.ym), company: SUM.company });
