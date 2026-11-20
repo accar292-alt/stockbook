@@ -305,3 +305,4 @@ table.mf-edit .mf-n { color: var(--mute); text-align: right; }
 .mf-page .mf-list .mf-hint, .mf-page .mf-list .mf-small { font-size: 13pt !important; }
 .cust2 { font-size: .9em; }
 .env-name2 { font-size: 18pt; }
+.tag.new { background: #e3f4e8; color: var(--ok); }

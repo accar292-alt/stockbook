@@ -51,7 +51,7 @@ const SCHEMA = `
     sent_date TEXT NOT NULL DEFAULT '',    -- วันที่ส่ง YYYY-MM-DD (ว่าง = ยังไม่ส่ง)
     carrier TEXT NOT NULL DEFAULT '',      -- ส่งทาง
     tracking_no TEXT NOT NULL DEFAULT '',  -- เลขพัสดุ
-    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sent','received','returned')),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sent','received','returned')), -- received: เลิกใช้แล้ว
     note TEXT NOT NULL DEFAULT '',
     created_by INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL,
     updated_by INTEGER REFERENCES users(id), updated_at TEXT,
@@ -124,6 +124,8 @@ const ensureReady = () => (ready ??= (async () => {
     if (!pcols.includes('postage')) await db.run('ALTER TABLE parcels ADD COLUMN postage INTEGER');
     // ชื่อลูกค้าบรรทัดที่ 2 (เช่น หน่วยงาน) — ซองเก็บสำเนาไว้ตอนส่ง, สมุดที่อยู่เก็บไว้เติมให้
     if (!pcols.includes('customer2')) await db.run(`ALTER TABLE parcels ADD COLUMN customer2 TEXT NOT NULL DEFAULT ''`);
+    // เลิกใช้สถานะ "ลูกค้าได้รับแล้ว" → ซองที่เคยตั้งไว้ถือเป็น "ส่งแล้ว"
+    await db.run(`UPDATE parcels SET status = 'sent' WHERE status = 'received'`);
     const cucols = (await db.all(`SELECT name FROM pragma_table_info('customers')`)).map((c) => c.name);
     if (!cucols.includes('name2')) await db.run(`ALTER TABLE customers ADD COLUMN name2 TEXT NOT NULL DEFAULT ''`);
     // ใบอนุญาตชำระค่าฝากส่งเป็นรายเดือน (แต่ละบริษัทเลขไม่เหมือนกัน) พิมพ์เป็นกรอบมุมขวาบนของหน้าซอง
@@ -168,8 +170,8 @@ function checkPassword(password) {
 }
 const setting = async (key) => (await db.get('SELECT value FROM settings WHERE key = ?', key))?.value ?? '';
 
-const STATUSES = ['pending', 'sent', 'received', 'returned'];
-const STATUS_TH = { pending: 'รอส่ง', sent: 'ส่งแล้ว', received: 'ลูกค้าได้รับแล้ว', returned: 'ตีกลับ' };
+const STATUSES = ['pending', 'sent', 'returned'];
+const STATUS_TH = { pending: 'รอส่ง', sent: 'ส่งแล้ว', returned: 'ตีกลับ' };
 // ประเภทบริการตามแบบฟอร์มใบนำส่งไปรษณีย์ (ช่อง "ส่งทาง" ของซองเก็บเป็น "ไปรษณีย์ไทย (ประเภท)")
 const POST_SERVICES = ['ลงทะเบียน', 'รับรอง', 'EMS', 'รับประกัน', 'พัสดุ', 'พกง.', 'ธรรมดา'];
 const serviceOf = (carrier) => { const m = /^ไปรษณีย์ไทย\s*\((.+)\)\s*$/.exec(carrier || ''); return m && POST_SERVICES.includes(m[1]) ? m[1] : ''; };
@@ -659,7 +661,8 @@ function parseDate(v) {
   return !isNaN(t) && t.getUTCDate() === d && y >= 2000 && y <= 2100 ? iso : null;
 }
 const STATUS_FROM_TH = Object.fromEntries(Object.entries(STATUS_TH).flatMap(([k, t]) => [[normHead(t), k], [k, k]]));
-STATUS_FROM_TH[normHead('ได้รับแล้ว')] = 'received';
+STATUS_FROM_TH[normHead('ได้รับแล้ว')] = 'sent';
+STATUS_FROM_TH[normHead('ลูกค้าได้รับแล้ว')] = 'sent';
 
 app.get('/api/import-template.xlsx', auth, (req, res) => {
   const addr = '99/1 ถ.สุขุมวิท แขวงคลองเตย เขตคลองเตย กรุงเทพฯ 10110';
