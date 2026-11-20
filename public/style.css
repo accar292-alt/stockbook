@@ -11,7 +11,7 @@ nav button:hover { background: rgba(255,255,255,.12); }
 nav button.on { background: #fff; color: var(--pri); font-weight: 600; }
 .who { display: flex; gap: 10px; align-items: center; font-size: .9em; }
 .link { background: none; border: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; padding: 0; }
-main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+main { max-width: 1400px; margin: 0 auto; padding: 16px; }
 h2 { margin: 0 0 12px; font-size: 1.35em; }
 .card { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
 .bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; margin-bottom: 12px; }
@@ -30,6 +30,8 @@ a.btn { text-decoration: none; display: inline-block; font: inherit; padding: 8p
 table { width: 100%; border-collapse: collapse; background: #fff; }
 th, td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 th { background: #eef2f7; font-weight: 600; font-size: .85em; white-space: nowrap; position: sticky; top: 0; }
+td.nowrap { white-space: nowrap; }
+.row-actions { display: flex; gap: 4px; justify-content: flex-end; }
 td.num, th.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 tr.low td { background: #fff6e5; }
 tr.zero td { background: #fdecea; }

@@ -302,13 +302,13 @@ views.docs = async () => {
   const load = async () => {
     const p = new URLSearchParams({ type: $('#type').value, from: $('#from').value, to: $('#to').value, q: $('#q').value });
     const docs = await api('/api/docs?' + p);
-    $('#rows').innerHTML = docs.map((d) => `<tr class="${d.cancelled ? 'void' : ''}"><td>${fmtDate(d.date)}</td><td>${esc(d.doc_no)}</td>
+    $('#rows').innerHTML = docs.map((d) => `<tr class="${d.cancelled ? 'void' : ''}"><td class="nowrap">${fmtDate(d.date)}</td><td class="nowrap">${esc(d.doc_no)}</td>
       <td>${d.cancelled ? `<span class="tag bad">ยกเลิก</span>${d.cancel_reason ? `<br><span class="void-reason">เหตุผล: ${esc(d.cancel_reason)}</span>` : ''}` : typeTag(d.type)}
         ${d.edit_count ? `<span class="tag off" title="แก้ไขแล้ว ${d.edit_count} ครั้ง ดูรายละเอียดท้ายใบเอกสาร">แก้ไขแล้ว</span>` : ''}</td><td>${esc(d.party)}</td><td>${esc(d.po_no)}</td><td>${esc(d.dept || d.reason)}</td>
       <td class="num">${num(d.item_count)}</td><td class="num">${num(d.total_qty)}</td><td>${esc(d.created_by)}</td>
-      <td style="white-space:nowrap"><a class="btn" style="padding:4px 9px;font-size:.85em" href="/slip.html?id=${d.id}" target="_blank">ดู/พิมพ์</a>
+      <td><div class="row-actions"><a class="btn" style="padding:4px 9px;font-size:.85em" href="/slip.html?id=${d.id}" target="_blank">ดู/พิมพ์</a>
       ${isAdmin() && !d.cancelled ? `<button class="btn ghost sm" data-edit="${d.id}">แก้ไข</button>
-        <button class="btn danger sm" data-cancel="${d.id}" data-no="${esc(d.doc_no)}">ยกเลิก</button>` : ''}</td></tr>`).join('')
+        <button class="btn danger sm" data-cancel="${d.id}" data-no="${esc(d.doc_no)}">ยกเลิก</button>` : ''}</div></td></tr>`).join('')
       || '<tr><td colspan="10" class="mute">ไม่พบเอกสาร</td></tr>';
   };
   $('#find').onclick = () => load().catch((e) => toast(e.message, true));
