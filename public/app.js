@@ -65,6 +65,12 @@ const pickFiles = (multiple) => new Promise((resolve) => {
   inp.onchange = () => resolve([...inp.files]);
   inp.click();
 });
+// ---------- หมวดหนังสือ ----------
+const CATEGORIES = ['แบบเรียน', 'สื่อเสริม', 'ปวช.'];
+const catOptions = (sel, all) => (all ? [['', 'ทุกหมวด']] : [['', '— ไม่ระบุ —']]).concat(CATEGORIES.map((c) => [c, c]))
+  .concat(all ? [['-', 'ยังไม่ระบุหมวด']] : [])
+  .map(([v, t]) => `<option value="${v}" ${v === sel ? 'selected' : ''}>${esc(t)}</option>`).join('');
+const catMatch = (b, cat) => !cat || (cat === '-' ? !b.category : b.category === cat);
 async function loadBooks() {
   state.books = await api('/api/books');
   // ป้ายแจ้งเตือนบนเมนู: จำนวนหนังสือที่ยอดต่ำกว่าขั้นต่ำ
@@ -155,21 +161,22 @@ views.stock = async () => {
     ${low ? `<div class="card alert">⚠ มีหนังสือ <b>${num(low)}</b> รายการ ที่ยอดคงเหลือต่ำกว่าขั้นต่ำ <button class="btn sm" id="showLow">ดูรายการ</button> <a class="btn" style="padding:4px 9px;font-size:.85em" href="/low-stock.html" target="_blank">🖨 พิมพ์ / PDF</a>${isAdmin() ? ' <a class="btn" style="padding:4px 9px;font-size:.85em" href="/api/export/stock.xlsx?low=1">ส่งออก Excel</a>' : ''}</div>` : ''}
     <div class="card"><div class="bar">
       <label class="grow">ค้นหา<input id="q" placeholder="รหัสหรือชื่อหนังสือ" autofocus></label>
+      <label>หมวด<select id="cat">${catOptions('', true)}</select></label>
       <label class="check" ${isSales() ? 'hidden' : ''}><input type="checkbox" id="onlyLow"> เฉพาะที่ต่ำกว่าขั้นต่ำ</label>
       ${isSales() ? '' : '<a class="btn" href="/low-stock.html" target="_blank">🖨 พิมพ์รายการต่ำกว่าขั้นต่ำ</a>'}
       ${isAdmin() ? '<a class="btn" href="/api/export/stock.xlsx">ส่งออก Excel</a>' : ''}</div>
-    <div class="tablewrap"><table><thead><tr><th>รูป</th><th>รหัส</th><th>ชื่อหนังสือ</th><th class="num">คงเหลือ</th><th>หน่วย</th>${isSales() ? '' : '<th class="num">ขั้นต่ำ</th>'}<th class="num">ราคาปก (บาท)</th></tr></thead><tbody id="rows"></tbody></table></div>
+    <div class="tablewrap"><table><thead><tr><th>รูป</th><th>รหัส</th><th>ชื่อหนังสือ</th><th>หมวด</th><th class="num">คงเหลือ</th><th>หน่วย</th>${isSales() ? '' : '<th class="num">ขั้นต่ำ</th>'}<th class="num">ราคาปก (บาท)</th></tr></thead><tbody id="rows"></tbody></table></div>
     <p class="mute" ${isSales() ? 'hidden' : ''}>คลิกที่รายการเพื่อดูบัตรสต็อก (ประวัติรับ-เบิกของหนังสือเล่มนั้น)</p></div>`;
   const draw = () => {
-    const q = $('#q').value.trim().toLowerCase(), onlyLow = $('#onlyLow').checked;
+    const q = $('#q').value.trim().toLowerCase(), onlyLow = $('#onlyLow').checked, cat = $('#cat').value;
     $('#rows').innerHTML = books
-      .filter((b) => (!q || (b.code + ' ' + b.name).toLowerCase().includes(q)) && (!onlyLow || isLow(b)))
+      .filter((b) => (!q || (b.code + ' ' + b.name).toLowerCase().includes(q)) && (!onlyLow || isLow(b)) && catMatch(b, cat))
       .map((b) => `<tr class="${isSales() ? '' : 'click'} ${b.stock <= 0 ? 'zero' : isLow(b) ? 'low' : ''}" data-id="${b.id}">
-        <td>${thumb(b)}</td><td>${esc(b.code)}</td><td>${esc(b.name)}</td><td class="num"><b>${num(b.stock)}</b></td><td>${esc(b.unit)}</td>${isSales() ? '' : `<td class="num">${num(b.min_qty)}</td>`}
+        <td>${thumb(b)}</td><td>${esc(b.code)}</td><td>${esc(b.name)}</td><td class="nowrap">${esc(b.category)}</td><td class="num"><b>${num(b.stock)}</b></td><td>${esc(b.unit)}</td>${isSales() ? '' : `<td class="num">${num(b.min_qty)}</td>`}
         <td class="num">${baht(b.price)}</td></tr>`).join('')
-      || `<tr><td colspan="${isSales() ? 6 : 7}" class="mute">ไม่พบรายการ</td></tr>`;
+      || `<tr><td colspan="${isSales() ? 7 : 8}" class="mute">ไม่พบรายการ</td></tr>`;
   };
-  $('#q').oninput = $('#onlyLow').onchange = draw;
+  $('#q').oninput = $('#onlyLow').onchange = $('#cat').onchange = draw;
   $('#rows').onclick = (e) => {
     if (e.target.dataset.zoom) return showImage(e.target.dataset.zoom);
     const tr = e.target.closest('tr[data-id]'); if (tr && !isSales()) showCard(tr.dataset.id);
@@ -368,28 +375,38 @@ views.report = async () => {
 views.books = async () => {
   await loadBooks();
   main.innerHTML = `<h2>จัดการรายชื่อหนังสือ</h2><div class="card"><div class="bar">
-    <label class="grow">ค้นหา<input id="q" placeholder="รหัสหรือชื่อหนังสือ"></label><button class="btn ghost" id="bulkImg">📷 นำเข้ารูปหลายไฟล์</button><button class="btn" id="add">+ เพิ่มหนังสือ</button></div>
+    <label class="grow">ค้นหา<input id="q" placeholder="รหัสหรือชื่อหนังสือ"></label><label>หมวด<select id="cat">${catOptions('', true)}</select></label><button class="btn ghost" id="bulkImg">📷 นำเข้ารูปหลายไฟล์</button><button class="btn" id="add">+ เพิ่มหนังสือ</button></div>
     <p class="mute">นำเข้ารูปหลายไฟล์: ตั้งชื่อไฟล์รูปเป็นรหัสหนังสือ เช่น ทข02001.jpg แล้วเลือกทุกไฟล์พร้อมกัน ระบบจะจับคู่กับหนังสือให้เอง</p>
-    <p class="mute">แก้ยอดขั้นต่ำของแต่ละเล่มได้ในช่อง "ขั้นต่ำ" โดยตรง ระบบจะเตือนเมื่อคงเหลือต่ำกว่าจำนวนนี้ (0 = ไม่เตือน)</p>
-    <div class="tablewrap"><table><thead><tr><th>รูป</th><th>รหัส</th><th>ชื่อหนังสือ</th><th>หน่วย</th><th class="num">ขั้นต่ำ</th><th class="num">ราคาปก (บาท)</th><th>สถานะ</th><th></th></tr></thead><tbody id="rows"></tbody></table></div></div>`;
+    <p class="mute">เปลี่ยนหมวดและแก้ยอดขั้นต่ำของแต่ละเล่มได้ในตารางโดยตรง ระบบจะเตือนเมื่อคงเหลือต่ำกว่าจำนวนนี้ (0 = ไม่เตือน)</p>
+    <div class="tablewrap"><table><thead><tr><th>รูป</th><th>รหัส</th><th>ชื่อหนังสือ</th><th>หมวด</th><th>หน่วย</th><th class="num">ขั้นต่ำ</th><th class="num">ราคาปก (บาท)</th><th>สถานะ</th><th></th></tr></thead><tbody id="rows"></tbody></table></div></div>`;
   const edit = (b) => formDialog(b ? 'แก้ไขหนังสือ' : 'เพิ่มหนังสือ', [
     { name: 'code', label: 'รหัส', value: b?.code }, { name: 'name', label: 'ชื่อหนังสือ', value: b?.name },
+    { name: 'category', label: 'หมวด', type: 'select', options: [['', '— ไม่ระบุ —'], ...CATEGORIES.map((c) => [c, c])], value: b?.category ?? '' },
     { name: 'unit', label: 'หน่วยนับ', value: b?.unit ?? 'เล่ม' },
     { name: 'min_qty', label: 'ยอดขั้นต่ำ (เตือนเมื่อคงเหลือต่ำกว่าจำนวนนี้, 0 = ไม่เตือน)', type: 'number', value: b?.min_qty ?? 500 },
     { name: 'price', label: 'ราคาปก (บาท)', type: 'number', step: '0.01', value: b?.price ?? 0 },
     { name: 'active', label: 'ใช้งานอยู่', type: 'checkbox', value: b ? b.active : 1 }],
     async (v) => { await api(b ? `/api/books/${b.id}` : '/api/books', b ? 'PUT' : 'POST', v); toast('บันทึกแล้ว'); views.books(); });
   const draw = () => {
-    const q = $('#q').value.trim().toLowerCase();
-    $('#rows').innerHTML = state.books.filter((b) => !q || (b.code + ' ' + b.name).toLowerCase().includes(q))
+    const q = $('#q').value.trim().toLowerCase(), cat = $('#cat').value;
+    $('#rows').innerHTML = state.books.filter((b) => (!q || (b.code + ' ' + b.name).toLowerCase().includes(q)) && catMatch(b, cat))
       .map((b) => `<tr><td><div class="withimg">${thumb(b)}<span><button class="link" data-img="${b.id}">${b.img ? 'เปลี่ยนรูป' : 'ใส่รูป'}</button>${b.img ? `<br><button class="link mute" data-delimg="${b.id}">ลบรูป</button>` : ''}</span></div></td>
-        <td>${esc(b.code)}</td><td>${esc(b.name)}</td><td>${esc(b.unit)}</td><td class="num"><input type="number" min="0" step="1" value="${b.min_qty}" data-min="${b.id}" style="width:110px;text-align:right"></td>
+        <td>${esc(b.code)}</td><td>${esc(b.name)}</td><td><select data-cat="${b.id}">${catOptions(b.category)}</select></td><td>${esc(b.unit)}</td><td class="num"><input type="number" min="0" step="1" value="${b.min_qty}" data-min="${b.id}" style="width:110px;text-align:right"></td>
         <td class="num">${baht(b.price)}</td>
         <td>${b.active ? '<span class="tag in">ใช้งาน</span>' : '<span class="tag off">ปิด</span>'}</td>
         <td><button class="btn ghost sm" data-id="${b.id}">แก้ไข</button></td></tr>`).join('');
   };
   // แก้ยอดขั้นต่ำในตารางได้เลย: พิมพ์ตัวเลขแล้วกด Enter หรือคลิกออกจากช่อง
   $('#rows').onchange = async (e) => {
+    const cb = state.books.find((x) => x.id == e.target.dataset.cat);
+    if (cb) {
+      try {
+        await api(`/api/books/${cb.id}`, 'PUT', { ...cb, category: e.target.value });
+        cb.category = e.target.value;
+        toast(`ตั้งหมวด ${cb.code} = ${cb.category || 'ไม่ระบุ'} แล้ว`);
+      } catch (err) { e.target.value = cb.category; toast(err.message, true); }
+      return;
+    }
     const b = state.books.find((x) => x.id == e.target.dataset.min);
     if (!b) return;
     const v = Number(e.target.value);
@@ -402,7 +419,7 @@ views.books = async () => {
     } catch (err) { e.target.value = b.min_qty; toast(err.message, true); }
   };
   $('#rows').onkeydown = (e) => { if (e.key === 'Enter' && e.target.dataset.min) e.target.blur(); };
-  $('#q').oninput = draw;
+  $('#q').oninput = $('#cat').onchange = draw;
   $('#add').onclick = () => edit(null);
   const book = (id) => state.books.find((b) => b.id == id);
   const refresh = async () => { await loadBooks(); draw(); };

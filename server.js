@@ -122,6 +122,14 @@ async function migrate() {
   // ราคาปก (แสดงอย่างเดียว ไม่ใช้คำนวณยอดรับ-เบิก) + ใส่ราคาจากไฟล์ครั้งเดียว
   const bookCols = (await db.all(`SELECT name FROM pragma_table_info('books')`)).map((c) => c.name);
   if (!bookCols.includes('price')) await db.run('ALTER TABLE books ADD COLUMN price REAL NOT NULL DEFAULT 0');
+  // หมวดหนังสือ + ตั้งหมวดเริ่มต้นครั้งเดียวจากรหัส (สส = สื่อเสริม, รหัสรายวิชาอื่น = แบบเรียน) แก้ทีหลังได้
+  if (!bookCols.includes('category')) await db.run(`ALTER TABLE books ADD COLUMN category TEXT NOT NULL DEFAULT ''`);
+  if (!(await db.get(`SELECT 1 FROM settings WHERE key = 'category_init'`)) && (await db.get('SELECT COUNT(*) c FROM books')).c > 0) {
+    await client.batch([
+      `UPDATE books SET category = CASE WHEN code LIKE 'สส%' THEN 'สื่อเสริม' ELSE 'แบบเรียน' END WHERE category = ''`,
+      `INSERT OR IGNORE INTO settings VALUES ('category_init', '1')`,
+    ], 'write');
+  }
   if (!(await db.get(`SELECT 1 FROM settings WHERE key = 'prices_2026_10_26'`)) && (await db.get('SELECT COUNT(*) c FROM books')).c > 0) {
     const { prices } = require('./seed/prices-2026-10-26.json');
     await client.batch([
@@ -306,10 +314,12 @@ app.get('/api/books', auth, async (req, res) => {
   res.json(req.user.role === 'sales' ? books.map(({ min_qty, ...b }) => b) : books);
 });
 
+const CATEGORIES = ['แบบเรียน', 'สื่อเสริม', 'ปวช.'];
 function bookInput(body) {
   const b = { code: str(body.code, 40), name: str(body.name, 300), unit: str(body.unit, 20) || 'เล่ม',
               min_qty: Number(body.min_qty) || 0, active: body.active === false || body.active === 0 ? 0 : 1,
-              price: Math.round((Number(body.price) || 0) * 100) / 100 };
+              price: Math.round((Number(body.price) || 0) * 100) / 100, category: str(body.category, 20) };
+  if (b.category && !CATEGORIES.includes(b.category)) fail(400, 'หมวดหนังสือไม่ถูกต้อง');
   if (!b.code || !b.name) fail(400, 'กรอกรหัสและชื่อหนังสือให้ครบ');
   if (!Number.isInteger(b.min_qty) || b.min_qty < 0) fail(400, 'ยอดขั้นต่ำไม่ถูกต้อง');
   if (!(b.price >= 0 && b.price < 1e6)) fail(400, 'ราคาไม่ถูกต้อง');
@@ -318,14 +328,15 @@ function bookInput(body) {
 app.post('/api/books', admin, async (req, res) => {
   const b = bookInput(req.body);
   if (await db.get('SELECT 1 FROM books WHERE code = ?', b.code)) fail(400, 'รหัสหนังสือนี้มีอยู่แล้ว');
-  await db.run('INSERT INTO books (code, name, unit, min_qty, active, price) VALUES (?, ?, ?, ?, ?, ?)', b.code, b.name, b.unit, b.min_qty, b.active, b.price);
+  await db.run('INSERT INTO books (code, name, unit, min_qty, active, price, category) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    b.code, b.name, b.unit, b.min_qty, b.active, b.price, b.category);
   res.json({ ok: true });
 });
 app.put('/api/books/:id', admin, async (req, res) => {
   const id = Number(req.params.id), b = bookInput(req.body);
   if (await db.get('SELECT 1 FROM books WHERE code = ? AND id <> ?', b.code, id)) fail(400, 'รหัสหนังสือนี้มีอยู่แล้ว');
-  const r = await db.run('UPDATE books SET code = ?, name = ?, unit = ?, min_qty = ?, active = ?, price = ? WHERE id = ?',
-    b.code, b.name, b.unit, b.min_qty, b.active, b.price, id);
+  const r = await db.run('UPDATE books SET code = ?, name = ?, unit = ?, min_qty = ?, active = ?, price = ?, category = ? WHERE id = ?',
+    b.code, b.name, b.unit, b.min_qty, b.active, b.price, b.category, id);
   if (!r.changes) fail(404, 'ไม่พบหนังสือ');
   res.json({ ok: true });
 });
@@ -530,14 +541,14 @@ function sendXlsx(res, filename, sheetName, rows, widths, priceCol) {
 
 app.get('/api/export/stock.xlsx', admin, async (req, res) => {
   const rows = [[await setting('org_name')], ['รายงานสต็อกคงเหลือ ณ วันที่ ' + now().slice(0, 10)], [],
-    ['รหัส', 'ชื่อหนังสือ', 'หน่วย', 'ราคาปก (บาท)', 'คงเหลือ', 'ยอดขั้นต่ำ', 'สถานะ']];
+    ['รหัส', 'ชื่อหนังสือ', 'หมวด', 'หน่วย', 'ราคาปก (บาท)', 'คงเหลือ', 'ยอดขั้นต่ำ', 'สถานะ']];
   const onlyLow = req.query.low === '1';
   if (onlyLow) rows[1] = ['รายงานหนังสือที่ยอดคงเหลือต่ำกว่าขั้นต่ำ ณ วันที่ ' + now().slice(0, 10)];
   for (const b of await listBooks()) {
     const low = b.min_qty > 0 && b.stock < b.min_qty;
-    if (b.active && (low || !onlyLow)) rows.push([b.code, b.name, b.unit, b.price, b.stock, b.min_qty, low ? 'ต่ำกว่าขั้นต่ำ' : '']);
+    if (b.active && (low || !onlyLow)) rows.push([b.code, b.name, b.category, b.unit, b.price, b.stock, b.min_qty, low ? 'ต่ำกว่าขั้นต่ำ' : '']);
   }
-  sendXlsx(res, onlyLow ? 'low-stock.xlsx' : 'stock.xlsx', 'คงเหลือ', rows, [12, 60, 8, 13, 10, 12, 16], 3);
+  sendXlsx(res, onlyLow ? 'low-stock.xlsx' : 'stock.xlsx', 'คงเหลือ', rows, [12, 60, 11, 8, 13, 10, 12, 16], 4);
 });
 
 app.get('/api/export/summary.xlsx', admin, async (req, res) => {
